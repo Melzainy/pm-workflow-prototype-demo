@@ -1,8 +1,8 @@
 {
   "name": "pm-workflow-prototype-demo",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Architectural project-management workflow PROTOTYPE v2 (public review copy). Demonstration data only. Not production.",
+  "description": "Architectural project-management workflow PROTOTYPE v3 (shareable review copy). Demonstration data only. Not production.",
   "type": "module",
   "license": "UNLICENSED",
   "engines": { "node": ">=18.18" },

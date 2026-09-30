@@ -1,5 +1,9 @@
 import * as E from './engine.js';
-import { PROJECT, DISC_NAMES } from './seed.js';
+import * as D from './seed.js';
+import { DISC_NAMES } from './seed.js';
+import * as R from './resource.js';
+import { projView, projectsOf } from './portfolio.js';
+import { St } from './rp.jsx';
 import { nextActions } from './wf.jsx';
 import { Reports } from './time.jsx';
 import { schedulePerformance } from './timeline.jsx';
@@ -8,22 +12,73 @@ import { Badge, Btn, Bar, Illus, TypeMark, fmt, Section, Empty, Hrs, Days } from
 const { useState, useMemo } = React;
 const { code, pad, whoLabel, TODAY } = E;
 
-export function Portfolio({ s, nav }) {
-  const active = E.livePhases(s).find((p) => p.state === 'active');
-  const blockers = nextActions({ ...s, viewer: 'pm' }).filter((x) => x.tone === 'bad').length;
-  const sp = schedulePerformance(s);
+export function Portfolio({ S, dispatch, nav, ui }) {
+  const M = R.resourceModel(S);
+  const ps = projectsOf(S);
+  const [form, setForm] = useState(null);
+  const admin = S.viewer === 'admin';
+  const people = R.companyPeople(S);
+  const w8 = people.map((p) => ({ p, s: R.personSummary(S, M, p.id, 0, 7), now: R.personSummary(S, M, p.id, 0, 0) }));
+  const C = w8.reduce((a, x) => a + x.s.cap, 0); const Dm = w8.reduce((a, x) => a + x.s.demand, 0); const u = C > 0 ? Math.round((Dm / C) * 100) : 0;
+  const over = w8.filter((x) => x.now.status.key === 'over');
+  const planned = M.assignments.reduce((a, x) => a + x.h, 0) + M.needed.reduce((a, x) => a + (x.role || x.reason === 'No one assigned' ? x.hours : 0), 0);
+  const approved = S.time.filter((e) => e.status === 'approved').reduce((a, e) => a + e.hours, 0);
+  const discRows = R.DISCIPLINES.map(([d, l]) => { const rows = w8.filter((x) => R.discOf(S, x.p) === d); const c = rows.reduce((a, x) => a + x.s.cap, 0); const dm = rows.reduce((a, x) => a + x.s.demand, 0); const uu = c > 0 ? Math.round((dm / c) * 100) : dm > 0 ? 999 : 0; return { d, l, n: rows.length, c, dm, u: uu, st: R.status(S, uu, c, dm), need: M.needed.filter((x) => x.need === d).length }; });
+  const projLoad = ps.map((P) => ({ P, h: M.assignments.filter((a) => a.proj === P.id).reduce((a, x) => { let h = 0; for (let i = 0; i < 4; i++) h += x.weeks[M.weeks[i]] || 0; return a + h; }, 0) })).sort((a, b) => b.h - a.h);
   return (
     <div className="page">
-      <div className="page-h"><div><h1>Projects</h1><p className="muted">Demo workspace. Demo projects never appear in the live portfolio.</p></div></div>
-      <div className="scroll"><table className="grid-table">
-        <thead><tr><th>Project</th><th>Current phase</th><th>Progress</th><th>D&P forecast</th><th>Blockers</th></tr></thead>
-        <tbody><tr className="clickable" tabIndex={0} onClick={() => nav.screen('dashboard')} onKeyDown={(e) => e.key === 'Enter' && nav.screen('dashboard')}>
-          <td><b>{PROJECT.name}</b> <Badge>Demo</Badge><div className="small muted">{PROJECT.address} · {PROJECT.method} · {PROJECT.template}</div></td>
-          <td>{active ? `Phase ${pad(E.phaseNo(s, active.uid))} · ${active.title}` : '—'}</td>
-          <td><Bar value={E.phaseProgress(s, active?.uid)} w={80} /> <Illus>{E.phaseProgress(s, active?.uid) ?? 0}%</Illus></td>
-          <td>{sp.uncertain ? <span className="twarn">Uncertain</span> : fmt(sp.ff)}</td>
-          <td>{blockers ? <Badge tone="bad">{blockers}</Badge> : <Badge tone="ok">0</Badge>}</td></tr></tbody>
-      </table></div>
+      <div className="page-h"><div><h1>Projects</h1><p className="muted">Company dashboard. Demonstration workspace: every project, date, assignment and hour is <Illus>illustrative / not verified</Illus>.</p></div>
+        {admin ? <Btn kind="primary" onClick={() => setForm(form ? null : { name: '', start: E.addDays(TODAY, 21) })}>+ Create New Project</Btn> : <span className="small muted">Administrators create projects.</span>}</div>
+      {form && <Section title="Create a new project from the template">
+        <div className="form tight"><label>Project name<input id="np-pname" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Demo Residence E" /></label>
+          <label>Phase 01 planned start<input type="date" id="np-start" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} /></label>
+          {[['arch', 'Architecture lead work'], ['int', 'Interior lead work'], ['civ', 'Civil lead work']].map(([k, l]) => <label key={k}>{l}<select id={`np-${k}`} value={form[k] || ''} onChange={(e) => setForm({ ...form, [k]: e.target.value })}><option value="">Leave TBD (resource needed)</option>{people.filter((p) => R.discOf(S, p) === k).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>)}
+        </div>
+        <Btn kind="primary" size="sm" disabled={!form.name.trim()} reason="Enter a name" onClick={() => { dispatch({ type: 'PROJECT_CREATE', name: form.name, start: form.start, roleMap: Object.fromEntries(['arch', 'int', 'civ'].filter((k) => form[k]).map((k) => [k, form[k]])) }); setForm(null); nav.project(); }}>Create project</Btn>
+        <p className="small muted">Uses {D.PROJECT.template}. Work owned by roles that are still TBD appears immediately under Resource needed; people you pick appear in Resource Planning at once.</p>
+      </Section>}
+      <Section title="Portfolio resources" right={<button className="linkish small" onClick={() => nav.area('resources')}>Open Resource Planning</button>}>
+        <div className="kpis k6">
+          <div><div className="lbl">Company utilization</div><b>{u}%</b><div className="sub">next 8 weeks · {Math.round(Dm)} of {Math.round(C)} h</div></div>
+          <div><div className="lbl">Overallocated this week</div><b>{over.length}</b><div className="sub">{over.map((x) => x.p.name).join(', ') || 'nobody'}</div></div>
+          <div><div className="lbl">Available capacity</div><b><Hrs v={Math.round(C - Dm)} /></b><div className="sub">unallocated, next 8 weeks</div></div>
+          <div><div className="lbl">Resource needed</div><b>{M.needed.length}</b><div className="sub">tasks with unassigned effort</div></div>
+          <div><div className="lbl">Planned remaining hours</div><b><Hrs v={Math.round(planned)} /></b><div className="sub">all active projects</div></div>
+          <div><div className="lbl">Approved actual hours</div><b><Hrs v={Math.round(approved)} /></b><div className="sub">to date, all projects</div></div>
+        </div>
+        <div className="split2">
+          <div><h4>Discipline utilization (next 8 weeks)</h4><table className="grid-table small num-right"><thead><tr><th>Discipline</th><th>People</th><th>Utilization</th><th>Needed</th></tr></thead><tbody>
+            {discRows.map((r) => <tr key={r.d} className="clickable" onClick={() => nav.area('resources', { sel: { kind: 'disc', id: r.d } })}><td>{r.l}</td><td>{r.n}</td><td>{r.n ? <>{r.u}% <St st={r.st} compact /></> : <span className="muted">no people</span>}</td><td>{r.need || ''}</td></tr>)}</tbody></table></div>
+          <div><h4>Most heavily loaded projects (next 4 weeks)</h4><ul className="plain small list">{projLoad.map(({ P, h }) => <li key={P.id}><button className="linkish" onClick={() => nav.area('resources', { f: { active: true, project: P.id }, view: 'project' })}>{P.name}</button><Hrs v={Math.round(h)} /></li>)}</ul></div>
+        </div>
+      </Section>
+      <Section title={`Active projects (${ps.length})`}>
+        <div className="scroll"><table className="grid-table small">
+          <thead><tr><th>Project</th><th>Current phase</th><th>PM</th><th>Progress</th><th>Next gate</th><th>Blockers</th><th>Planned h</th><th>Approved h</th><th>Demand, 4 wk</th><th>Schedule</th><th>D&P forecast</th></tr></thead>
+          <tbody>{ps.map((P) => {
+            const V = projView(S, P.id); const active = E.livePhases(V).find((p) => p.state === 'active');
+            const g = active && E.gateOfPhase(V, active.uid); const r = g && E.gateReadiness(V, g.uid);
+            const blockers = nextActions({ ...V, viewer: 'pm' }).filter((x) => x.tone === 'bad').length;
+            const sp = schedulePerformance(V); const aps = active && E.phaseSchedule(V, active.uid);
+            const dv = aps?.ff && aps?.pf ? E.workBetween(aps.pf, aps.ff, V.holidays) : null;
+            const est = Object.values(V.tasks).filter((t) => !t.archived).reduce((a, t) => a + t.est, 0);
+            const ap = V.time.filter((e) => e.status === 'approved').reduce((a, e) => a + e.hours, 0);
+            return <tr key={P.id} className="clickable" tabIndex={0} onClick={() => nav.project(P.id)} onKeyDown={(e) => e.key === 'Enter' && nav.project(P.id)}>
+              <td><b>{P.name}</b> <Badge>Demo</Badge><div className="muted">{P.address}</div></td>
+              <td>{active ? `${pad(E.phaseNo(V, active.uid))} · ${active.title}` : '—'}</td>
+              <td>{V.roles.pm ? E.person(V, V.roles.pm)?.name : <span className="muted">TBD</span>}</td>
+              <td><Bar value={E.phaseProgress(V, active?.uid)} w={60} /> <Illus>{E.phaseProgress(V, active?.uid) ?? 0}%</Illus></td>
+              <td>{g ? `${E.gateName(V, g)} · ${r.approved}/${r.total - 1}` : '—'}</td>
+              <td>{blockers ? <Badge tone="bad">{blockers}</Badge> : '0'}</td>
+              <td><Hrs v={est} /></td><td><Hrs v={Math.round(ap)} /></td>
+              <td><Hrs v={Math.round(projLoad.find((x) => x.P.id === P.id)?.h || 0)} /></td>
+              <td>{aps?.uncertain ? <span className="twarn">uncertain</span> : <Days n={dv} />}</td>
+              <td>{sp.uncertain ? <span className="twarn" title={sp.uncertain}>Uncertain</span> : fmt(sp.ff)}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+        <p className="small muted">Schedule = forecast finish of the active phase against its current plan. D&P forecast = Design & Permitting completion (Phase 06 is not scoped and excluded).</p>
+      </Section>
     </div>
   );
 }
@@ -43,7 +98,7 @@ export function Dashboard({ s, nav }) {
   const varPh = (r) => (r.af ? E.workBetween(r.pf, r.af, s.holidays) : r.ff ? E.workBetween(r.pf, r.ff, s.holidays) : null);
   return (
     <div className="page">
-      <div className="page-h"><div><h1>Project dashboard</h1><p className="muted">{PROJECT.name}. Every figure comes from the workflow, approved timesheets and the forecast rules. Click a line to open it.</p></div></div>
+      <div className="page-h"><div><h1>Project dashboard</h1><p className="muted">{s.name}. Every figure comes from the workflow, approved timesheets and the forecast rules. Click a line to open it.</p></div></div>
       <div className="dash">
         <Section title="Phases" className="span2">
           <div className="scroll"><table className="phase-table"><thead><tr><th /><th>Phase</th><th>Progress</th><th>Gate</th><th>Current plan finish</th><th>Forecast</th><th>Hours (approved / est.)</th><th /></tr></thead>
@@ -111,7 +166,7 @@ export function Dashboard({ s, nav }) {
 
 export function MyWork({ s, nav, dispatch }) {
   const vp = E.viewerPerson(s);
-  const [pick, setPick] = useState('alex');
+  const [pick, setPick] = useState('mansour');
   const me = vp || pick;
   const p = E.person(s, me);
   const f = E.forecastAll(s);

@@ -77,7 +77,7 @@ export function Timeline({ s, dispatch, ui, setUi, nav }) {
   const tf = sel && s.tasks[sel];
   return (
     <div className="page">
-      <div className="page-h"><div><h1>Master timeline</h1><p className="muted">Demo Residence · one schedule, driven by the workflow, approved hours and the forecast rules below.</p></div></div>
+      <div className="page-h"><div><h1>Master timeline</h1><p className="muted">{s.name} · one schedule, driven by the workflow, approved hours and the forecast rules below.</p></div></div>
       <div className="toolbar wrap">
         <div className="seg" role="group" aria-label="Overlay">{MODES.map(([k, l]) => <button key={k} className={mode === k ? 'on' : ''} aria-pressed={mode === k} onClick={() => set({ tlMode: k })}>{l}</button>)}</div>
         <label className="check small"><input type="checkbox" id="tl-base" checked={base} onChange={(e) => set({ tlBase: e.target.checked })} /> Compare with approved baseline</label>
@@ -148,8 +148,9 @@ export function Timeline({ s, dispatch, ui, setUi, nav }) {
       <Section title="How the forecast is calculated" className="rules">
         <ul className="plain small">
           <li>• Remaining effort = PM-entered value, otherwise estimate × (1 − progress). Hours logged never change progress.</li>
-          <li>• Weekly rate = each assignee's weekly capacity ÷ number of open tasks they share in the same planned window. The PM can override any allocation.</li>
-          <li>• Roles not yet assigned to a person use a 32 h/week planning assumption, labelled on the task.</li>
+          <li>• Each assignee's share of the remaining effort comes from the allocation entered on the task (hours or %). Without one, the effort is split equally and labelled "allocation not defined".</li>
+          <li>• Weekly rate = the planned rate for that share over the task's current window, scaled by the person's capacity ÷ total demand across all projects in those weeks (Resource Planning), and never above their weekly availability. Vacation, holidays and overload therefore slow the forecast. The PM can override any rate.</li>
+          <li>• Roles not yet assigned to a person are forecast at their planned rate and labelled as an assumption.</li>
           <li>• A task starts no earlier than today, its planned start, its dependencies' forecast finish, and the forecast release of the previous phase gate.</li>
           <li>• Weekends and holidays ({s.holidays.map(fmt).join(', ')}) are skipped. Blockers, holds and missing capacity make a forecast uncertain instead of guessing.</li>
           <li>• Actual bars use approved hours only. Submitted hours show separately. Gates, not hours or forecasts, complete a phase.</li>
@@ -169,7 +170,9 @@ function TaskPanel({ s, t, dispatch, nav, close }) {
   const [rem, setRem] = useState(E.remainingOf(s, t));
   const [why, setWhy] = useState('');
   const [alloc, setAlloc] = useState({});
-  useEffect(() => { setRem(E.remainingOf(s, t)); setWhy(''); setAlloc({}); }, [t.uid, t.remaining, t.pct]);
+  const [ah, setAh] = useState({});
+  const canAlloc = pm || E.isAdmin(s);
+  useEffect(() => { setRem(E.remainingOf(s, t)); setWhy(''); setAlloc({}); setAh({}); }, [t.uid, t.remaining, t.pct, JSON.stringify(t.alloc), JSON.stringify(t.hpw)]);
   const d = E.done(s, t);
   const est = E.estRollup(s, t);
   const effortVar = Math.round((hk.approved + (d ? 0 : E.remainingOf(s, t) + E.children(s, t.uid).reduce((a, k) => a + (E.done(s, k) ? 0 : E.remainingOf(s, k)), 0)) - est) * 10) / 10;
@@ -198,22 +201,28 @@ function TaskPanel({ s, t, dispatch, nav, close }) {
       {inc.length > 0 && <p className="note warn small">No time logged in the last week by {inc.map((p) => E.person(s, p).name).join(', ')}. Actuals may be incomplete.</p>}
       {!d && <>
         <h4>Resourcing used by the forecast</h4>
-        <table className="grid-table small"><thead><tr><th>Assignee</th><th>Capacity</th><th>Shared with</th><th>h / wk</th></tr></thead><tbody>
-          {(f.alloc || []).map((a) => <tr key={a.id}><td>{a.name}{a.placeholder && <div className="muted">assumption</div>}</td><td>{a.cap} h</td><td>{a.load} task{a.load > 1 ? 's' : ''}</td>
-            <td>{pm ? <input type="number" min="0" max="40" step="1" aria-label={`Hours per week for ${a.name}`} className="num" value={alloc[a.id] ?? a.hpw} onChange={(e) => setAlloc({ ...alloc, [a.id]: Number(e.target.value) })} /> : a.hpw}{a.explicit && <span className="muted"> set</span>}</td></tr>)}
+        <table className="grid-table small"><thead><tr><th>Assignee</th><th>Allocated</th><th>Load in window</th><th>h / wk</th></tr></thead><tbody>
+          {(f.alloc || []).map((a) => <tr key={a.id}><td>{a.name}{a.placeholder && <div className="muted">TBD · planned rate assumed</div>}</td>
+            <td>{canAlloc ? <input type="number" min="0" step="1" aria-label={`Allocated hours for ${a.name}`} className="num" value={ah[a.id] ?? a.h} onChange={(e) => setAh({ ...ah, [a.id]: Number(e.target.value) })} /> : `${a.h} h`}
+              <div className="muted">{a.hExplicit ? 'allocated' : 'not defined · equal split'}</div></td>
+            <td>{a.util != null ? <>{a.util}% <span className="muted">of {a.cap} h/wk</span></> : <span className="muted">—</span>}</td>
+            <td>{pm ? <input type="number" min="0" max="60" step="1" aria-label={`Forecast hours per week for ${a.name}`} className="num" value={alloc[a.id] ?? a.hpw} onChange={(e) => setAlloc({ ...alloc, [a.id]: Number(e.target.value) })} /> : a.hpw}{a.explicit && <span className="muted"> set</span>}</td></tr>)}
         </tbody></table>
+        <p className="small muted">Load = this person's demand across every project ÷ their availability over this task's window. Allocation changes here are the same records Resource Planning reads.</p>
         {pm ? <div className="form tight">
           <label>Remaining effort (h)<input id="tl-rem" type="number" min="0" value={rem} onChange={(e) => setRem(Number(e.target.value))} /></label>
           <label className="span2">Reason (required)<input id="tl-why" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="e.g. Survey data arrived; redline scope smaller" /></label>
           <div className="row span2">
             <Btn kind="primary" size="sm" disabled={!why.trim()} reason="Record a reason" onClick={() => {
               if (rem !== E.remainingOf(s, t)) dispatch({ type: 'REMAINING', uid: t.uid, hours: rem, reason: why });
-              Object.entries(alloc).forEach(([p, v]) => dispatch({ type: 'ALLOC', uid: t.uid, person: p, hpw: v, reason: why }));
+              Object.entries(ah).forEach(([p, v]) => dispatch({ type: 'ALLOC', uid: t.uid, ref: p, h: v, reason: why }));
+              Object.entries(alloc).forEach(([p, v]) => dispatch({ type: 'HPW', uid: t.uid, person: p, hpw: v, reason: why }));
             }}>Update forecast inputs</Btn>
             <Btn size="sm" onClick={() => dispatch({ type: 'HOLD', uid: t.uid, on: !t.hold })}>{t.hold ? 'Release hold' : 'Place on hold'}</Btn>
           </div>
         </div> : <p className="small muted">Only the PM adjusts remaining effort and allocation.</p>}
       </>}
+      {(t.allocHistory || []).length > 0 && <><h4>Allocation history</h4><ul className="plain small hist">{t.allocHistory.map((r, i) => <li key={i}>{fmt(r.date)} · {r.by}: {E.whoLabel(s, r.ref)} → {r.to}{r.reason ? ` — "${r.reason}"` : ''}</li>)}</ul></>}
       {t.remHistory.length > 0 && <><h4>Forecast input history</h4><ul className="plain small hist">{t.remHistory.map((r, i) => <li key={i}>{fmt(r.date)} · {r.by}: {r.alloc || `remaining ${r.from} → ${r.to} h`} — "{r.reason}"</li>)}</ul></>}
       <p className="row wrap"><button className="linkish small" onClick={() => nav.task(t.uid)}>Open in Workflow</button><button className="linkish small" onClick={() => nav.time(t.uid)}>Timesheet entries ({h.entries.length})</button></p>
     </aside>

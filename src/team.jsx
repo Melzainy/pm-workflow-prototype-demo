@@ -7,7 +7,7 @@ const { code, whoLabel } = E;
 
 export function Team({ s, dispatch, nav }) {
   const admin = E.isAdmin(s);
-  const [sel, setSel] = useState('alex');
+  const [sel, setSel] = useState('mansour');
   const [showInactive, setShowInactive] = useState(true);
   const [np, setNp] = useState({ name: '', teams: ['arch'], note: '' });
   const [nt, setNt] = useState('');
@@ -15,7 +15,7 @@ export function Team({ s, dispatch, nav }) {
   const p = E.person(s, sel);
   return (
     <div className="page">
-      <div className="page-h"><div><h1>Team directory</h1><p className="muted">All names are fictional sample data. No one here has an app account, and every assignment is illustrative.</p></div></div>
+      <div className="page-h"><div><h1>Team directory</h1><p className="muted">Names are the working roster. No one here has an app account yet, and every assignment is illustrative until the PM confirms it.</p></div></div>
       {!admin && <p className="note small">Read-only. The Administrator edits the directory; the PM or Administrator assigns project roles.</p>}
       <div className="split">
         <div>
@@ -43,7 +43,7 @@ export function Team({ s, dispatch, nav }) {
               <div className="row"><input id="nt-name" value={nt} onChange={(e) => setNt(e.target.value)} placeholder="e.g. Landscape" /><Btn size="sm" disabled={!nt.trim()} onClick={() => { dispatch({ type: 'TEAM_ADD', name: nt }); setNt(''); }}>Create</Btn></div>
             </>}
           </Section>
-          <Section title="Project roles · Demo Residence">
+          <Section title={`Project roles · ${s.name}`}>
             <table className="grid-table small"><tbody>{ROLE_DEFS.filter(([k]) => k !== 'client').map(([k, l]) => (
               <tr key={k}><td>{l}</td><td>{(admin || E.isPM(s)) ? <select id={`role-${k}`} value={s.roles[k] || ''} onChange={(e) => dispatch({ type: 'ROLE_ASSIGN', role: k, person: e.target.value || null })}><option value="">TBD</option>{s.people.filter((x) => x.active).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select> : (s.roles[k] ? E.person(s, s.roles[k]).name : <span className="muted">TBD</span>)}</td>
                 <td className="small muted">{Object.values(s.tasks).filter((t) => !t.archived && (t.owner === `role:${k}` || t.contrib.includes(`role:${k}`))).length} tasks</td></tr>))}</tbody></table>
@@ -79,10 +79,11 @@ function PersonPanel({ s, p, admin, dispatch, nav }) {
       <div className="form">
         <label>Name<input id="pp-name" value={f.name} disabled={!admin} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label>Specialty<input id="pp-note" value={f.note} disabled={!admin} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
-        <label>Weekly capacity (h)<input id="pp-cap" type="number" min="0" max="60" value={f.cap} disabled={!admin} onChange={(e) => setF({ ...f, cap: Number(e.target.value) })} /></label>
+        <label>Weekly capacity (h) · {p.capVerified ? 'verified' : 'illustrative'}<input id="pp-cap" type="number" min="0" max="60" value={f.cap} disabled={!admin} onChange={(e) => setF({ ...f, cap: Number(e.target.value) })} /></label>
+        <label>Primary discipline team<select id="pp-primary" disabled={!admin || f.teams.length < 2} value={f.teams[0] || ''} onChange={(e) => setF({ ...f, teams: [e.target.value, ...f.teams.filter((x) => x !== e.target.value)] })}>{f.teams.map((id) => <option key={id} value={id}>{s.teams.find((t) => t.id === id)?.name}</option>)}</select></label>
         <fieldset className="span2 checks"><legend className="flabel">Teams</legend>{s.teams.filter((t) => !t.archived).map((t) => <label key={t.id} className="check small"><input type="checkbox" disabled={!admin} checked={f.teams.includes(t.id)} onChange={(e) => setF({ ...f, teams: e.target.checked ? [...f.teams, t.id] : f.teams.filter((x) => x !== t.id) })} /> {t.name}</label>)}</fieldset>
       </div>
-      {admin && <div className="row"><Btn size="sm" kind="primary" disabled={JSON.stringify(f) === JSON.stringify({ name: p.name, note: p.note, cap: p.cap, teams: p.teams })} onClick={() => dispatch({ type: 'PERSON_UPDATE', id: p.id, patch: f })}>Save</Btn>
+      {admin && <div className="row"><Btn size="sm" kind="primary" disabled={JSON.stringify(f) === JSON.stringify({ name: p.name, note: p.note, cap: p.cap, teams: p.teams })} onClick={() => { const { cap, ...rest } = f; dispatch({ type: 'PERSON_UPDATE', id: p.id, patch: rest }); if (cap !== p.cap) dispatch({ type: 'CAP_SET', person: p.id, hpw: cap, from: E.weekOf(E.TODAY) }); }}>Save</Btn>
         <Btn size="sm" kind={p.active ? 'danger' : undefined} onClick={() => dispatch({ type: 'PERSON_UPDATE', id: p.id, patch: { active: !p.active } })}>{p.active ? 'Deactivate' : 'Reactivate'}</Btn></div>}
       {!p.active && <p className="note small">Deactivated. Approved timesheets, approvals and history stay attributed to {p.name}. Open assignments should be reassigned by the PM{openT.length ? ` (${openT.length} still open)` : ''}.</p>}
       <p className="small">{roles.length ? <>Project roles: <b>{roles.join(', ')}</b> · </> : null}Approved <Hrs v={ap} /> · pending <Hrs v={pe} /> · {load} task{load !== 1 ? 's' : ''} planned in the next 2 weeks</p>
@@ -90,6 +91,7 @@ function PersonPanel({ s, p, admin, dispatch, nav }) {
       {tasks.length ? <table className="grid-table small"><tbody>{tasks.map((t) => <tr key={t.uid}><td><button className="linkish" onClick={() => nav.task(t.uid)}><span className="mono">{code(s, t)}</span> {t.title}</button></td><td>{roleOf(t)}</td><td>{E.status(s, t).label}</td></tr>)}</tbody></table> : <Empty>No workflow tasks assigned.</Empty>}
       <h4>Drawing responsibilities ({sheets.length})</h4>
       {sheets.length ? <table className="grid-table small"><tbody>{sheets.map((x) => <tr key={x.no}><td><button className="linkish" onClick={() => nav.sheet(x.no)}><span className="mono">{x.no}</span> {x.title}</button></td><td>{sheetRole(x)}</td><td>{x.pct}%</td></tr>)}</tbody></table> : <Empty>No sheets assigned.</Empty>}
+      <p className="small muted">Capacity changes take effect from this week and are kept as dated periods; set future periods and vacation in Resource Planning. Workload across all projects is shown there.</p>
       <p className="small muted">Disciplines: {[...new Set(p.teams.map((t) => s.teams.find((q) => q.id === t)?.disc))].map((d) => DISC_NAMES[d] || d).join(', ')}</p>
     </Section>
   );

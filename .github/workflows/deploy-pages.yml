@@ -1,6 +1,6 @@
 # OPTIONAL. Publishes dist/ to GitHub Pages. Manual trigger only, so nothing goes public by accident.
 # GitHub Pages sites are PUBLIC on the internet unless the organisation is on GitHub Enterprise Cloud
-# with private Pages enabled. See "Hosting" in README.md.
+# with private Pages enabled. Read "Hosting for review" in README.md before running this.
 name: Deploy prototype to GitHub Pages
 on:
   workflow_dispatch:

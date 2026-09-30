@@ -184,6 +184,7 @@ export function TaskDetail({ s, t, dispatch, nav }) {
         <WhoSelect s={s} id={`own-${t.uid}`} value={t.owner} disabled={!assign} title={!assign ? 'Only the PM or an administrator assigns owners' : undefined} onChange={(v) => dispatch({ type: 'ASSIGN', uid: t.uid, patch: { owner: v } })} />
         <h4>Contributors</h4>
         <MultiWho s={s} id={`con-${t.uid}`} values={t.contrib} disabled={!assign} onChange={(v) => dispatch({ type: 'ASSIGN', uid: t.uid, patch: { contrib: v } })} />
+        <AllocTable s={s} t={t} dispatch={dispatch} assign={assign} />
         <h4>Plan <Illus>(illustrative)</Illus></h4>
         <p className="small">Current {fmt(t.ps)} → {fmt(t.pf)}<br /><span className="muted">{t.bs ? <>Baseline {fmt(t.bs)} → {fmt(t.bf)}</> : 'Not in baseline (added after approval)'}</span></p>
         <p className="small muted">Stable ID {t.uid}{t.legacy ? ` · formerly ${t.legacy}` : ''}{t.codeHistory?.length ? ` · was ${t.codeHistory.map((c) => c.code).join(', ')}` : ''}</p>
@@ -194,7 +195,7 @@ export function TaskDetail({ s, t, dispatch, nav }) {
         <p className="small muted">Hours never change progress or gate status.</p>
         {inc.length > 0 && <p className="note warn small">Actual effort incomplete: no time logged in the last week by {inc.map((p) => E.person(s, p).name).join(', ')}.</p>}
         <h4>Forecast</h4>
-        <p className="small">{E.done(s, t) ? <>Finished {fmt(t.af)} <Days n={E.workBetween(t.pf, t.af, s.holidays)} /></> : f.uncertain ? <span className="twarn">Uncertain: {f.uncertain}</span> : f.finish ? <>Forecast {fmt(f.finish)} <Days n={E.workBetween(t.pf, f.finish, s.holidays)} />{f.assumed && <span className="muted"> · assumes TBD roles at 32 h/wk</span>}</> : '—'}</p>
+        <p className="small">{E.done(s, t) ? <>Finished {fmt(t.af)} <Days n={E.workBetween(t.pf, t.af, s.holidays)} /></> : f.uncertain ? <span className="twarn">Uncertain: {f.uncertain}</span> : f.finish ? <>Forecast {fmt(f.finish)} <Days n={E.workBetween(t.pf, f.finish, s.holidays)} />{f.placeholder && <span className="muted"> · TBD roles assumed at their planned rate</span>}{f.notDefined && <span className="muted"> · allocation not defined (equal split)</span>}</> : '—'}</p>
         <p className="row wrap"><button className="linkish small" onClick={() => nav.timeline(t.uid)}>Open in timeline</button><button className="linkish small" onClick={() => nav.time(t.uid)}>Timesheets for this task</button></p>
         {t.deps.length > 0 && <><h4>Depends on</h4><ul className="plain small">{t.deps.map((d) => s.tasks[d] && <li key={d}><span className={`ck ${E.done(s, s.tasks[d]) ? 'y' : ''}`} /><button className="linkish" onClick={() => nav.task(d)}><span className="mono">{code(s, s.tasks[d])}</span> {s.tasks[d].title}</button></li>)}</ul></>}
         {t.sheets.length > 0 && <><h4>Linked sheets</h4><p className="small">{t.sheets.map((no) => <button key={no} className="linkish mono sheetlink" onClick={() => nav.sheet(no)}>{no}</button>)}</p></>}
@@ -220,6 +221,23 @@ export function TaskDetail({ s, t, dispatch, nav }) {
       </div>
     </div>
   );
+}
+
+function AllocTable({ s, t, dispatch, assign }) {
+  const sh = E.shares(s, t);
+  const [ed, setEd] = useState({});
+  if (!sh.units.length || sh.rem <= 0) return null;
+  return <>
+    <h4>Allocation of remaining effort <Illus>(illustrative)</Illus></h4>
+    <table className="grid-table small alloc"><tbody>{sh.units.map((u) => <tr key={u.key}>
+      <td>{u.name}</td>
+      <td className="nowrap">{assign && u.pid ? <><input type="number" min="0" className="num" aria-label={`Allocated hours for ${u.name}`} value={ed[u.key] ?? u.h} onChange={(e) => setEd({ ...ed, [u.key]: Number(e.target.value) })} /> h</> : <>{u.h} h</>}
+        <div className="muted">{u.explicit ? (u.pct != null ? `${u.pct}% of remaining` : 'allocated') : 'allocation not defined'}</div></td>
+      {assign && u.pid && <td className="nowrap"><button className="linkish small" disabled={ed[u.key] == null} onClick={() => { dispatch({ type: 'ALLOC', uid: t.uid, ref: u.key, h: ed[u.key] }); setEd({ ...ed, [u.key]: undefined }); }}>Set</button>
+        {u.explicit && <> · <button className="linkish small" onClick={() => dispatch({ type: 'ALLOC', uid: t.uid, ref: u.key })}>Clear</button></>}</td>}
+    </tr>)}</tbody></table>
+    <p className="small muted">{sh.rem} h remaining. Resource Planning reads these same allocations.</p>
+  </>;
 }
 
 function TypeControls({ s, t, dispatch, edit, why }) {

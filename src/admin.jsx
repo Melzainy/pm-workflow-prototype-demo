@@ -23,12 +23,12 @@ export function Admin({ s, dispatch, ui, setUi }) {
       <div className="page-h">
         <div><h1>Admin · Workflow editor</h1><p className="muted">Changes apply to the same records every screen uses. Stable IDs never change; display numbers follow position.</p></div>
         <div className="scope" role="group" aria-label="What you are editing">
-          <button className={s.scope === 'proj' ? 'on' : ''} onClick={() => dispatch({ type: 'SCOPE', scope: 'proj' })}>This project · Demo Residence</button>
+          <button className={s.scope === 'proj' ? 'on' : ''} onClick={() => dispatch({ type: 'SCOPE', scope: 'proj' })}>This project · {s.name}</button>
           <button className={s.scope === 'tpl' ? 'on' : ''} onClick={() => dispatch({ type: 'SCOPE', scope: 'tpl' })}>Template · Standard Residential Modular {s.tpl.version}</button>
         </div>
       </div>
       {!admin && <p className="note warn">Read-only. Switch "Viewing as" to Administrator to edit the structure.</p>}
-      {s.scope === 'tpl' && <p className="note">Editing the reusable template. Demo Residence is not affected: it keeps template v1.0 until its PM accepts an upgrade. {admin && !s.tpl.published && <Btn size="xs" onClick={() => dispatch({ type: 'TPL_PUBLISH' })}>Publish v1.1</Btn>}{s.tpl.published && <Badge tone="ok">v1.1 published</Badge>}</p>}
+      {s.scope === 'tpl' && <p className="note">Editing the reusable template. {s.name} is not affected: it keeps template v1.0 until its PM accepts an upgrade. {admin && !s.tpl.published && <Btn size="xs" onClick={() => dispatch({ type: 'TPL_PUBLISH' })}>Publish v1.1</Btn>}{s.tpl.published && <Badge tone="ok">v1.1 published</Badge>}</p>}
       <div className="admin">
         <nav className="tree" aria-label="Project structure">
           <div className="tree-tools"><label className="check small"><input type="checkbox" id="showarch" checked={showArch} onChange={(e) => setShowArch(e.target.checked)} /> Show archived</label></div>

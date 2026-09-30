@@ -61,7 +61,7 @@ function MyTime({ s, dispatch, ui, nav }) {
       <Section title={e.uid ? 'Edit entry' : 'Log time'} right={<span className="small muted">{E.person(s, me).name} · this week <Hrs v={weekH} /> of {cap} h capacity</span>}>
         <div className="form">
           <label className="span2">Task or subtask<TaskPicker s={s} id="te-task" value={e.task} mineFirst onChange={(v) => setE({ ...e, task: v })} /></label>
-          <div className="span2 autofill small">{snap ? <>Project <b>Demo Residence</b> · Phase <b>{pad(snap.phaseNo)}</b> {E.phase(s, snap.phase).title} · WP <b>{snap.wpTitle}</b> · {DISC_NAMES[snap.disc]}{!E.involves(s, t, me) && <span className="twarn"> · You are not assigned to this task</span>}</> : <span className="muted">Phase and work package fill in from the task.</span>}</div>
+          <div className="span2 autofill small">{snap ? <>Project <b>{s.name}</b> · Phase <b>{pad(snap.phaseNo)}</b> {E.phase(s, snap.phase).title} · WP <b>{snap.wpTitle}</b> · {DISC_NAMES[snap.disc]}{!E.involves(s, t, me) && <span className="twarn"> · You are not assigned to this task</span>}</> : <span className="muted">Phase and work package fill in from the task.</span>}</div>
           <label>Date<input id="te-date" type="date" value={e.date} max={TODAY} onChange={(x) => setE({ ...e, date: x.target.value })} /></label>
           <label>Hours<input id="te-hours" type="number" min="0.25" max="16" step="0.25" value={e.hours} onChange={(x) => setE({ ...e, hours: x.target.value })} /></label>
           <label className="span2">Work description<input id="te-desc" value={e.desc} onChange={(x) => setE({ ...e, desc: x.target.value })} placeholder="What you worked on" /></label>
@@ -134,7 +134,7 @@ export function Reports({ s, focus, clearFocus, nav, compact }) {
   const showPlan = ['phase', 'wp', 'task'].includes(by);
   const moved = es.filter((e) => e.status === 'approved' && s.tasks[e.task] && E.snapOf(s, e.task).wp !== e.snap.wp);
   return (
-    <Section title={compact ? 'Project hours' : 'Hours report · Demo Residence'} right={focus && <span className="small">Filtered to <b className="mono">{code(s, s.tasks[focus])}</b> <button className="linkish" onClick={clearFocus}>Show all</button></span>}>
+    <Section title={compact ? 'Project hours' : `Hours report · ${s.name}`} right={focus && <span className="small">Filtered to <b className="mono">{code(s, s.tasks[focus])}</b> <button className="linkish" onClick={clearFocus}>Show all</button></span>}>
       <div className="filters wrap">
         <label>From<input type="date" id="rp-from" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></label>
         <label>To<input type="date" id="rp-to" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></label>

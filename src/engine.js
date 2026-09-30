@@ -75,12 +75,12 @@ function mkTask(uid, wp, parent, order, t, rt) {
     req: t.req || 'required', priority: 'normal', w: t.w ?? 0, est: t.est ?? 0, ps: t.ps, pf: t.pf, bs: t.bs || t.ps, bf: t.bf || t.pf,
     pct: rt ? (t.pct ?? 0) : 0, as: rt ? (t.as || (t.pct ? t.ps : null)) : null, af: rt ? (t.af || null) : null, deps: [], outputs: t.outputs || [], criteria: t.criteria || '',
     sheets: t.sheets || [], archived: false, legacy: t.legacy || null, blocker: t.blocker || null, hold: false, minutes: rt ? !!t.minutes : false,
-    options: t.options || null, choice: null, jur: t.jur || null, doc: t.doc || null, evidence: null, outcome: null, remaining: null, remHistory: [], alloc: {},
+    options: t.options || null, choice: null, jur: t.jur || null, doc: t.doc || null, evidence: null, outcome: null, remaining: null, remHistory: [], alloc: {}, hpw: {}, allocHistory: [],
     note: t.note || '', group: t.group || null, vendors: !!t.vendors, codeHistory: [],
   };
 }
 
-export function initialState() {
+export function buildMainProject() {
   const st = buildStructure(true);
   const tpl = buildStructure(false);
   const time = D.TIME.map(([person, code, date, hours, status, desc], i) => ({ uid: `TE-${i + 1}`, person, task: st.codeToUid[code], date, hours, desc, status, note: '', approvedBy: status === 'approved' ? 'Project Manager' : null, snap: null }));
@@ -163,7 +163,7 @@ export function resolve(s, who) { // → person id or null
 }
 export function whoLabel(s, who) {
   if (!who) return '—';
-  if (who.startsWith('role:')) { const k = who.slice(5); const p = s.roles[k] && person(s, s.roles[k]); return p ? (p.name === roleLabel(k) ? p.name : `${p.name} (${roleLabel(k)})`) : `${roleLabel(k)} (TBD)`; }
+  if (who.startsWith('role:')) { const k = who.slice(5); const p = s.roles[k] && person(s, s.roles[k]); return p ? `${p.name} (${roleLabel(k)})` : `${roleLabel(k)} (TBD)`; }
   const p = person(s, who); return p ? p.name + (p.active ? '' : ' (inactive)') : who;
 }
 export const viewerPerson = (s) => (s.viewer === 'pm' ? s.roles.pm : s.viewer === 'admin' || s.viewer === 'exec' ? null : s.viewer);
@@ -176,15 +176,41 @@ export function viewerLabel(s) {
   if (s.viewer === 'exec') return 'Executive Management';
   return person(s, s.viewer)?.name || s.viewer;
 }
-export const PLACEHOLDER_CAP = 32; // planning assumption for roles not yet assigned to a person
-export function capUnits(s, t) { // who supplies capacity to this task
-  const out = [];
+export const PLACEHOLDER_CAP = 32; // retained for reference; v3 forecasts TBD roles at their planned rate
+const NON_CAPACITY_ROLES = ['client', 'ext'];
+export const ROLE_DISC = { arch: 'arch', int: 'int', str: 'str', mep: 'mep', civ: 'civ', bim: 'bim', mfg: 'mfg', pm: 'pm', exec: 'pm', geo: 'consult', surv: 'consult' };
+export function primaryDisc(s, p) { const t = s.teams.find((x) => x.id === p?.teams?.[0]); return t ? t.disc : 'pm'; }
+// Work window used by resource planning and the forecast: remaining effort is spread over the
+// working days of the current plan from today on. Past-due work is placed over the next 5 working days.
+export function taskWindow(s, t) {
+  const hol = s.holidays;
+  let from = nextWork(t.ps > TODAY ? t.ps : TODAY, hol); let to = t.pf; let overdue = false;
+  if (!to || to < from) { overdue = !!to; to = addWork(from, 4, hol); }
+  const days = []; for (let d = from; d <= to; d = addDays(d, 1)) if (isWork(d, hol)) days.push(d);
+  return { from, to, overdue, days: days.length ? days : [from] };
+}
+// Who carries the remaining effort of a task and how much. Explicit allocations (hours or % of
+// remaining effort) win; anything left is split equally and flagged as an illustrative assumption.
+export function shares(s, t) {
+  const rem = done(s, t) ? 0 : remainingOf(s, t);
+  const units = []; let external = false;
   [t.owner, ...t.contrib].forEach((ref) => {
+    if (!ref) return;
     const pid = resolve(s, ref);
-    if (pid) { const p = person(s, pid); if (p && p.active && p.cap > 0 && !out.some((o) => o.key === pid)) out.push({ key: pid, name: p.name, cap: p.cap }); }
-    else if (ref && ref.startsWith('role:') && !['client', 'ext'].includes(ref.slice(5)) && !out.some((o) => o.key === ref)) out.push({ key: ref, name: `${roleLabel(ref.slice(5))} (TBD)`, cap: PLACEHOLDER_CAP, placeholder: true });
+    if (ref.startsWith('role:') && !pid && NON_CAPACITY_ROLES.includes(ref.slice(5))) return;
+    const p = pid && person(s, pid);
+    if (p && (p.external || (p.cap === 0 && p.teams.includes('ext')))) { external = true; return; } // external reviewers are not company capacity
+    const key = pid || ref;
+    if (units.some((u) => u.key === key)) { const u = units.find((x) => x.key === key); u.refs.push(ref); return; }
+    units.push({ key, refs: [ref], pid: pid || null, name: p ? p.name : `${roleLabel(ref.slice(5))} (TBD)`, disc: p ? primaryDisc(s, p) : ROLE_DISC[ref.slice(5)] || t.disc, role: pid ? null : ref.slice(5) });
   });
-  return out;
+  const exp = (u) => { for (const r of [u.key, ...u.refs]) { const a = t.alloc?.[r]; if (a && (a.h != null || a.pct != null)) return a; } return null; };
+  let defined = 0; let any = false;
+  units.forEach((u) => { const a = exp(u); if (a) { any = true; u.explicit = true; u.h = a.h != null ? a.h : Math.round(rem * a.pct) / 100; u.pct = a.pct ?? null; defined += u.h; } });
+  const open = units.filter((u) => !u.explicit);
+  const left = Math.max(0, rem - defined);
+  open.forEach((u) => { u.h = open.length ? Math.round((left / open.length) * 10) / 10 : 0; u.assumed = true; });
+  return { rem, units, external: external && !units.length, defined: any, allDefined: units.length > 0 && !open.length };
 }
 export const assignees = (s, t) => [...new Set([t.owner, ...t.contrib].map((w) => resolve(s, w)).filter(Boolean))];
 export function involves(s, t, pid) { if (!pid) return false; return assignees(s, t).includes(pid); }
@@ -225,13 +251,8 @@ export function forecastAll(s) {
   const hol = s.holidays;
   const res = {};
   const today = nextWork(TODAY, hol);
-  const loadCache = {};
-  // Capacity is shared only with tasks whose planned windows overlap (simultaneous work).
-  const load = (key, t) => {
-    const k = key + t.uid; if (loadCache[k] != null) return loadCache[k];
-    const n = Object.values(s.tasks).filter((x) => !x.archived && x.est > 0 && !done(s, x) && x.ps <= t.pf && x.pf >= t.ps && capUnits(s, x).some((u) => u.key === key)).length;
-    return (loadCache[k] = Math.max(1, n));
-  };
+  const RM = s._RM ? s._RM() : null; // portfolio resource model (all projects), when available
+  const r1 = (x) => Math.round(x * 10) / 10;
   const phaseRelease = {}; // puid -> {date, cond}
   const phasesSorted = livePhases(s);
   const visit = (uid, stack = []) => {
@@ -268,19 +289,31 @@ export function forecastAll(s) {
     const started = pctOf(s, t) > 0 || h.approved > 0 || h.pending > 0;
     let start = started ? today : maxD(earliest, nextWork(t.ps, hol));
     if (started) start = maxD(today, earliest > today && openDeps(s, t).length ? earliest : today);
-    const rem = remainingOf(s, t);
-    const alloc = capUnits(s, t).map((u) => ({ id: u.key, name: u.name, placeholder: !!u.placeholder, cap: u.cap, load: load(u.key, t),
-      hpw: t.alloc[u.key] != null ? t.alloc[u.key] : Math.round((u.cap / load(u.key, t)) * 10) / 10, explicit: t.alloc[u.key] != null }));
+    const sh = shares(s, t); const rem = sh.rem;
+    const win = taskWindow(s, t); const wks = win.days.length / 5;
+    // Each assignee works at their planned rate for this task, scaled by how loaded they are across
+    // ALL projects over the same weeks (capacity ÷ demand), and never above their weekly capacity.
+    const alloc = sh.units.map((u) => {
+      const plan = u.h / wks; let rate = plan; let cap = null; let util = null;
+      if (u.pid && RM) { const L = RM.load(u.pid, win.from, win.to); cap = r1(L.capPerWk); util = L.util; rate = L.cap > 0 ? Math.min(plan * (L.cap / Math.max(L.demand, 0.001)), L.capPerWk) : 0; }
+      else if (u.pid) cap = person(s, u.pid)?.cap ?? null;
+      const ov = [u.key, ...u.refs].map((k) => t.hpw?.[k]).find((v) => v != null);
+      if (ov != null) rate = ov;
+      return { id: u.key, name: u.name, placeholder: !u.pid, h: u.h, hExplicit: !!u.explicit, assumed: !!u.assumed, cap, util, plan: r1(plan), hpw: r1(rate), explicit: ov != null,
+        days: u.h <= 0 ? 0 : rate > 0 ? Math.ceil(u.h / (rate / 5)) : Infinity };
+    });
     const rate = alloc.reduce((a, x) => a + x.hpw, 0);
     if (t.blocker) uncertain = `Blocked: ${t.blocker}`;
     if (t.hold) uncertain = 'On hold';
-    let finish;
+    let finish = null;
     const kids = children(s, uid).map((k) => visit(k.uid, [...stack, uid]));
-    if (rem > 0 && rate <= 0) { uncertain = uncertain || 'No one with capacity is assigned'; finish = null; }
-    else if (rem <= 0) finish = start;
-    else { const days = Math.ceil(rem / (rate / 5)); finish = addWork(start, Math.max(0, days - 1), hol); }
+    const stuck = alloc.filter((x) => x.days === Infinity);
+    if (rem > 0 && !alloc.length && sh.external) finish = addWork(start, Math.max(0, workBetween(t.ps, t.pf, hol)), hol); // external party: planned duration
+    else if (rem > 0 && !alloc.length) uncertain = uncertain || 'No one is assigned';
+    else if (stuck.length) uncertain = uncertain || `No available capacity: ${stuck.map((x) => x.name).join(', ')}`;
+    else { const days = Math.max(0, ...alloc.map((x) => x.days)); finish = days > 0 ? addWork(start, days - 1, hol) : start; }
     kids.forEach((k) => { if (k.finish && finish) finish = maxD(finish, k.finish); if (k.uncertain && !uncertain && k.rem > 0) uncertain = `Subtask uncertain: ${k.uncertain}`; });
-    Object.assign(r, { kind: 'forecast', start, finish, rem, rate, alloc, assumed: alloc.some((x) => x.placeholder), uncertain, cond: [...new Set(conditions)], days: rate > 0 ? Math.ceil(rem / (rate / 5)) : null });
+    Object.assign(r, { kind: 'forecast', start, finish, rem, rate: r1(rate), alloc, assumed: alloc.some((x) => x.placeholder || x.assumed), placeholder: alloc.some((x) => x.placeholder), notDefined: !sh.defined && alloc.length > 0, uncertain, cond: [...new Set(conditions)], days: finish ? workBetween(start, finish, hol) + 1 : null });
     return (res[uid] = r);
   };
   Object.keys(s.tasks).forEach((uid) => visit(uid));
@@ -445,7 +478,6 @@ export function reducer(s, a) {
   switch (a.type) {
     case 'VIEWER': return { ...s, viewer: a.v, notice: { tone: 'accent', text: `Now viewing as ${viewerLabel({ ...s, viewer: a.v })}`, n: s.seq }, seq: s.seq + 1 };
     case 'DISMISS': return { ...s, notice: null };
-    case 'RESET': return { ...initialState(), notice: { tone: 'accent', text: 'Demo reset to its starting state', n: 1 } };
 
     // Workflow
     case 'PCT': {
@@ -545,12 +577,21 @@ export function reducer(s, a) {
       const t = s.tasks[a.uid];
       return ok(setTask(s, a.uid, { remaining: a.hours, remHistory: [...t.remHistory, { date: TODAY, at: stamp(), from: remainingOf(s, t), to: a.hours, reason: a.reason, by: viewerLabel(s) }] }), `${code(s, t)} remaining effort set to ${a.hours} h`);
     }
-    case 'ALLOC': {
-      if (!isPM(s)) return no(s, 'Only the PM adjusts resource allocation.');
-      const nm = a.person.startsWith('role:') ? `${roleLabel(a.person.slice(5))} (TBD)` : person(s, a.person).name;
+    case 'ALLOC': { // planned effort allocation for one assignee: hours of remaining effort, % of it, or cleared
+      if (!isPM(s) && !isAdmin(s)) return no(s, 'Only the PM or an administrator sets allocations.');
+      const t = s.tasks[a.uid]; const nm = whoLabel(s, a.ref);
+      if (a.h != null && !(a.h >= 0 && a.h <= 2000)) return no(s, 'Allocation must be between 0 and 2000 h.');
+      if (a.pct != null && !(a.pct >= 0 && a.pct <= 100)) return no(s, 'Allocation must be between 0 and 100 %.');
+      const alloc = { ...t.alloc }; if (a.h == null && a.pct == null) delete alloc[a.ref]; else alloc[a.ref] = a.h != null ? { h: a.h } : { pct: a.pct };
+      const txt = a.h != null ? `${a.h} h` : a.pct != null ? `${a.pct} %` : 'not defined';
+      return ok(setTask(s, a.uid, { alloc, allocHistory: [...(t.allocHistory || []), { date: TODAY, at: stamp(), ref: a.ref, to: txt, reason: a.reason || '', by: viewerLabel(s) }] }), `${code(s, t)} allocation: ${nm} → ${txt}`);
+    }
+    case 'HPW': { // PM override of the weekly rate the forecast assumes for one assignee
+      if (!isPM(s)) return no(s, 'Only the PM adjusts resource availability for the forecast.');
       if (!(a.reason || '').trim()) return no(s, 'Record a reason for the change.');
-      const t = s.tasks[a.uid];
-      return ok(setTask(s, a.uid, { alloc: { ...t.alloc, [a.person]: a.hpw }, remHistory: [...t.remHistory, { date: TODAY, at: stamp(), alloc: `${nm} → ${a.hpw} h/wk`, reason: a.reason, by: viewerLabel(s) }] }), `${code(s, t)} allocation: ${nm} ${a.hpw} h/wk`);
+      const t = s.tasks[a.uid]; const nm = whoLabel(s, a.person);
+      const hpw = { ...(t.hpw || {}) }; if (a.hpw == null) delete hpw[a.person]; else hpw[a.person] = a.hpw;
+      return ok(setTask(s, a.uid, { hpw, remHistory: [...t.remHistory, { date: TODAY, at: stamp(), alloc: `${nm} → ${a.hpw == null ? 'calculated rate' : `${a.hpw} h/wk`}`, reason: a.reason, by: viewerLabel(s) }] }), `${code(s, t)} forecast rate: ${nm} ${a.hpw == null ? 'calculated' : `${a.hpw} h/wk`}`);
     }
     case 'SHIFT': {
       const t = s.tasks[a.uid]; if (!isPM(s) && !isAdmin(s)) return no(s, 'Only the PM or an administrator moves planned dates.');
@@ -608,7 +649,7 @@ export function reducer(s, a) {
     case 'PERSON_ADD': {
       if (!isAdmin(s)) return no(s, 'Only an administrator edits the team directory.');
       const id = a.name.toLowerCase().replace(/[^a-z0-9]+/g, '') + s.seq;
-      return ok({ ...s, people: [...s.people, { id, name: a.name, teams: a.teams, note: a.note || '', cap: 32, active: true, kind: 'person' }] }, `${a.name} added to the directory`);
+      return ok({ ...s, people: [...s.people, { id, name: a.name, teams: a.teams, note: a.note || '', cap: a.cap ?? 40, caps: [{ hpw: a.cap ?? 40, from: TODAY, to: null }], capVerified: false, active: true, kind: 'person' }] }, `${a.name} added to the directory`);
     }
     case 'PERSON_UPDATE': {
       if (!isAdmin(s)) return no(s, 'Only an administrator edits the team directory.');

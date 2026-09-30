@@ -16,12 +16,7 @@ export function Drawings({ s, dispatch, ui, setUi, nav }) {
   const reqsFor = (no) => s.reqs.filter((r) => r.primary === no || r.secondary.includes(no));
   const conditional = s.reqs.filter((r) => r.applicability === 'conditional');
   const involved = (x, pid) => [x.lead, x.owner, ...x.contrib, ...x.reviewers].some((r) => E.resolve(s, r) === pid);
-  const tracks = [
-    { name: 'Zoning & drainage review', auth: 'City of Anytown', jur: ['J4'] },
-    { name: 'Building permit & inspections', auth: 'Sample Township', jur: ['J5', 'J2'] },
-    { name: 'Soil erosion permit', auth: 'Agency not yet sourced', jur: ['J1'] },
-    { name: 'State premanufactured unit', auth: 'LARA BCC · form BCC-323 rev 04/2024', jur: ['J3'] },
-  ];
+  const tracks = [...new Set(s.jur.map((j) => j.track))].map((tr) => { const js = s.jur.filter((j) => j.track === tr); return { name: tr, auth: [...new Set(js.map((j) => j.authority))].join(' · '), jur: js.map((j) => j.id) }; });
   const readiness = (t) => {
     const js = t.jur.map((id) => s.jur.find((j) => j.id === id));
     if (js.some((j) => j.status === 'blocked')) return ['warn', 'Blocked by decision'];
