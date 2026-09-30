@@ -75,7 +75,7 @@ function mkTask(uid, wp, parent, order, t, rt) {
     req: t.req || 'required', priority: 'normal', w: t.w ?? 0, est: t.est ?? 0, ps: t.ps, pf: t.pf, bs: t.bs || t.ps, bf: t.bf || t.pf,
     pct: rt ? (t.pct ?? 0) : 0, as: rt ? (t.as || (t.pct ? t.ps : null)) : null, af: rt ? (t.af || null) : null, deps: [], outputs: t.outputs || [], criteria: t.criteria || '',
     sheets: t.sheets || [], archived: false, legacy: t.legacy || null, blocker: t.blocker || null, hold: false, minutes: rt ? !!t.minutes : false,
-    options: t.options || null, choice: null, jur: t.jur || null, doc: t.doc || null, evidence: null, outcome: null, remaining: null, remHistory: [], alloc: {}, hpw: {}, allocHistory: [],
+    options: t.options || null, choice: null, jur: t.jur || null, doc: t.doc || null, evidence: null, outcome: null, remaining: null, remHistory: [], alloc: {}, hpw: {}, allocHistory: [], accel: false,
     note: t.note || '', group: t.group || null, vendors: !!t.vendors, codeHistory: [],
   };
 }
@@ -269,11 +269,11 @@ export function forecastAll(s) {
     const r = { uid, aStart, lastAct, firstPending: pendingDates[0] || null, lastPending: pendingDates[pendingDates.length - 1] || null };
     if (done(s, t)) { Object.assign(r, { kind: 'actual', start: aStart || t.ps, finish: t.af || t.pf, rem: 0 }); return (res[uid] = r); }
     let earliest = today; let uncertain = null; const conditions = [];
-    // Parent/child: children forecast feed the parent
+    const drivers = []; // [date, unconfirmed?] for whatever sets the earliest start
     for (const d of t.deps) {
       const f = visit(d, [...stack, uid]);
       if (f.uncertain) uncertain = uncertain || `Depends on ${code(s, s.tasks[d])} (uncertain)`;
-      if (f.finish) earliest = maxD(earliest, addWork(f.finish, 1, hol));
+      if (f.finish) { earliest = maxD(earliest, addWork(f.finish, 1, hol)); drivers.push([addWork(f.finish, 1, hol), !!f.unconf]); }
       if (f.cond) conditions.push(...f.cond);
     }
     if (ph.state === 'locked') {
@@ -281,7 +281,7 @@ export function forecastAll(s) {
       const prev = phasesSorted[idx - 1];
       if (prev) {
         const rel = phaseRelease[prev.uid] || (phaseRelease[prev.uid] = phaseForecast(s, prev.uid, visit));
-        if (rel.finish) earliest = maxD(earliest, addWork(rel.finish, 1, hol));
+        if (rel.finish) { earliest = maxD(earliest, addWork(rel.finish, 1, hol)); drivers.push([addWork(rel.finish, 1, hol), !!rel.unconf]); }
         if (rel.uncertain) uncertain = uncertain || `Starts after ${gateName(s, gateOfPhase(s, prev.uid))} (uncertain)`;
         conditions.push(`${gateName(s, gateOfPhase(s, prev.uid))} release`);
       }
@@ -312,8 +312,16 @@ export function forecastAll(s) {
     else if (rem > 0 && !alloc.length) uncertain = uncertain || 'No one is assigned';
     else if (stuck.length) uncertain = uncertain || `No available capacity: ${stuck.map((x) => x.name).join(', ')}`;
     else { const days = Math.max(0, ...alloc.map((x) => x.days)); finish = days > 0 ? addWork(start, days - 1, hol) : start; }
+    // Planned finish is the earliest normal forecast, unless the PM marked the task effort-driven.
+    const floored = !!(finish && !t.accel && t.pf && finish < t.pf);
+    if (floored) finish = t.pf;
     kids.forEach((k) => { if (k.finish && finish) finish = maxD(finish, k.finish); if (k.uncertain && !uncertain && k.rem > 0) uncertain = `Subtask uncertain: ${k.uncertain}`; });
-    Object.assign(r, { kind: 'forecast', start, finish, rem, rate: r1(rate), alloc, assumed: alloc.some((x) => x.placeholder || x.assumed), placeholder: alloc.some((x) => x.placeholder), notDefined: !sh.defined && alloc.length > 0, uncertain, cond: [...new Set(conditions)], days: finish ? workBetween(start, finish, hol) + 1 : null });
+    // Resource owner unconfirmed: a TBD role carries part of this task, or it waits on such a task.
+    const ownTBD = alloc.some((x) => x.placeholder && x.h > 0);
+    const depTBD = drivers.some(([d, u]) => u && d >= start);
+    const kidTBD = kids.some((k) => k.unconf && k.finish && k.finish === finish);
+    const unconf = rem > 0 && (ownTBD || depTBD || kidTBD) ? (ownTBD ? `${alloc.filter((x) => x.placeholder).map((x) => x.name).join(', ')} not assigned` : depTBD ? 'Waits on work with an unconfirmed owner' : 'Subtask owner unconfirmed') : null;
+    Object.assign(r, { kind: 'forecast', start, finish, floored, accel: !!t.accel, unconf, rem, rate: r1(rate), alloc, assumed: alloc.some((x) => x.placeholder || x.assumed), placeholder: alloc.some((x) => x.placeholder), notDefined: !sh.defined && alloc.length > 0, uncertain, cond: [...new Set(conditions)], days: finish ? workBetween(start, finish, hol) + 1 : null });
     return (res[uid] = r);
   };
   Object.keys(s.tasks).forEach((uid) => visit(uid));
@@ -332,6 +340,8 @@ function phaseForecast(s, puid, visit) {
   const fs = recs.map((t) => visit(t.uid));
   const finish = fs.reduce((a, f) => maxD(a, f.finish), '0000-00-00');
   const uncertainTask = fs.find((f) => f.uncertain);
+  const fin = finish === '0000-00-00' ? null : finish;
+  const driver = fs.find((f) => f.unconf && f.finish && f.finish === fin); // on the path that sets the phase finish
   const r = gateReadiness(s, g?.uid);
   const pendingGate = g && !s.releases[g.uid] ? r.total - r.approved - 1 : 0;
   return {
@@ -340,6 +350,7 @@ function phaseForecast(s, puid, visit) {
     uncertain: uncertainTask ? `${code(s, s.tasks[uncertainTask.uid])}: ${uncertainTask.uncertain}` : null,
     gatePending: ph.state === 'released' ? 0 : pendingGate,
     released: ph.state === 'released',
+    unconf: ph.state === 'released' || !driver ? null : `${code(s, s.tasks[driver.uid])}: ${driver.unconf}`,
   };
 }
 
@@ -356,7 +367,7 @@ export function phaseSchedule(s, puid) {
   const ps = recs.reduce((a, t) => minD(a, t.ps), null), pf2 = recs.reduce((a, t) => maxD(a, t.pf), null);
   const aStarts = recs.map((t) => f[t.uid]?.aStart).filter(Boolean).sort();
   return { bs, bf: bf === '0000-00-00' ? null : bf, ps, pf: pf2 === '0000-00-00' ? null : pf2, as: aStarts[0] || null, af: phase(s, puid).state === 'released' ? s.releases[gateOfPhase(s, puid)?.uid]?.date : null,
-    ff: pf.finish, uncertain: pf.uncertain, gatePending: pf.gatePending, est, approved, pending, rem, count: top.length };
+    ff: pf.finish, uncertain: pf.uncertain, unconf: pf.unconf, gatePending: pf.gatePending, est, approved, pending, rem, count: top.length };
 }
 
 export function incompleteTime(s, t) { // assignees with no entries on this task in the last 5 working days
@@ -585,6 +596,11 @@ export function reducer(s, a) {
       const alloc = { ...t.alloc }; if (a.h == null && a.pct == null) delete alloc[a.ref]; else alloc[a.ref] = a.h != null ? { h: a.h } : { pct: a.pct };
       const txt = a.h != null ? `${a.h} h` : a.pct != null ? `${a.pct} %` : 'not defined';
       return ok(setTask(s, a.uid, { alloc, allocHistory: [...(t.allocHistory || []), { date: TODAY, at: stamp(), ref: a.ref, to: txt, reason: a.reason || '', by: viewerLabel(s) }] }), `${code(s, t)} allocation: ${nm} → ${txt}`);
+    }
+    case 'ACCEL': { // effort-driven / acceleratable: the forecast may finish before the planned finish
+      if (!isPM(s)) return no(s, 'Only the PM marks a task as effort-driven.');
+      const t = s.tasks[a.uid];
+      return ok(setTask(s, a.uid, { accel: !!a.on, remHistory: [...t.remHistory, { date: TODAY, at: stamp(), alloc: a.on ? 'marked effort-driven (may finish early)' : 'no longer effort-driven', reason: a.reason || '', by: viewerLabel(s) }] }), `${code(s, t)} ${a.on ? 'marked effort-driven: forecast may finish before the planned finish' : 'forecast floored at planned finish again'}`);
     }
     case 'HPW': { // PM override of the weekly rate the forecast assumes for one assignee
       if (!isPM(s)) return no(s, 'Only the PM adjusts resource availability for the forecast.');

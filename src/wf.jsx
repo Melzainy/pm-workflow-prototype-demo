@@ -1,6 +1,6 @@
 import { DISC_NAMES } from './seed.js';
 import * as E from './engine.js';
-import { Badge, Btn, Bar, Illus, TypeMark, fmt, Section, Hrs, WhoSelect, MultiWho, Req, Days } from './ui.jsx';
+import { Badge, Btn, Bar, Illus, TypeMark, fmt, Section, Hrs, WhoSelect, MultiWho, Req, Days, Unconf } from './ui.jsx';
 
 const { useState } = React;
 const { code, whoLabel, pad } = E;
@@ -195,7 +195,7 @@ export function TaskDetail({ s, t, dispatch, nav }) {
         <p className="small muted">Hours never change progress or gate status.</p>
         {inc.length > 0 && <p className="note warn small">Actual effort incomplete: no time logged in the last week by {inc.map((p) => E.person(s, p).name).join(', ')}.</p>}
         <h4>Forecast</h4>
-        <p className="small">{E.done(s, t) ? <>Finished {fmt(t.af)} <Days n={E.workBetween(t.pf, t.af, s.holidays)} /></> : f.uncertain ? <span className="twarn">Uncertain: {f.uncertain}</span> : f.finish ? <>Forecast {fmt(f.finish)} <Days n={E.workBetween(t.pf, f.finish, s.holidays)} />{f.placeholder && <span className="muted"> · TBD roles assumed at their planned rate</span>}{f.notDefined && <span className="muted"> · allocation not defined (equal split)</span>}</> : '—'}</p>
+        <p className="small">{E.done(s, t) ? <>Finished {fmt(t.af)} <Days n={E.workBetween(t.pf, t.af, s.holidays)} /></> : f.uncertain ? <span className="twarn">Uncertain: {f.uncertain}</span> : f.finish ? <>Forecast {fmt(f.finish)} <Days n={E.workBetween(t.pf, f.finish, s.holidays)} />{f.unconf && <> <Unconf long why={f.unconf} /></>}{f.floored && <span className="muted"> · held at planned finish</span>}{f.accel && <span className="muted"> · effort-driven</span>}{f.notDefined && <span className="muted"> · allocation not defined (equal split)</span>}</> : '—'}</p>
         <p className="row wrap"><button className="linkish small" onClick={() => nav.timeline(t.uid)}>Open in timeline</button><button className="linkish small" onClick={() => nav.time(t.uid)}>Timesheets for this task</button></p>
         {t.deps.length > 0 && <><h4>Depends on</h4><ul className="plain small">{t.deps.map((d) => s.tasks[d] && <li key={d}><span className={`ck ${E.done(s, s.tasks[d]) ? 'y' : ''}`} /><button className="linkish" onClick={() => nav.task(d)}><span className="mono">{code(s, s.tasks[d])}</span> {s.tasks[d].title}</button></li>)}</ul></>}
         {t.sheets.length > 0 && <><h4>Linked sheets</h4><p className="small">{t.sheets.map((no) => <button key={no} className="linkish mono sheetlink" onClick={() => nav.sheet(no)}>{no}</button>)}</p></>}

@@ -127,13 +127,45 @@ step(23, 'The forecast reacts to the reduced capacity', () => { const a = M().as
 step(24, 'Company dashboard reads the same model', () => { const u = R.companyPeople(S).reduce((x, p) => { const q = P(p.id); return { c: x.c + q.cap, d: x.d + q.demand }; }, { c: 0, d: 0 }); return [u.c > 0, `company utilization ${Math.round((u.d / u.c) * 100)}% next 8 weeks`]; });
 step(25, 'Portfolio summary matches Resource Planning', () => { const over = R.companyPeople(S).filter((p) => R.personSummary(S, M(), p.id, 0, 0).status.key === 'over').map((p) => p.name); return [true, `over this week: ${over.join(', ') || 'none'} · resource-needed items ${M().needed.length}`]; });
 
-const rpPassed = results.length - wfTotal; const rpOk = results.slice(wfTotal).filter(Boolean).length;
-console.log(`Resource Planning scenario (v3): ${rpOk}/${rpPassed} passed`);
-// Data rules
+const rpPassed0 = results.length - wfTotal;
+const nBeforeDec = results.length;
+const rpOk = results.slice(wfTotal, nBeforeDec).filter(Boolean).length;
+console.log(`Resource Planning scenario (v3): ${rpOk}/${rpPassed0} passed\n`);
+
+// ── Approved v3 decisions ───────────────────────────────────────────────────
+suite = 'D';
+S = PF.initialState();
+step(1, 'PM, BIM Manager and Manufacturing Lead stay TBD in every project', () => [PF.projectsOf(S).every((P) => !P.roles.pm && !P.roles.bim && !P.roles.mfg), `${PF.projectsOf(S).length} projects checked`]);
+step(2, 'Capacity is illustrative and editable per person by effective date', () => {
+  const p0 = S.people.find((p) => p.id === 'lara');
+  d({ type: 'VIEWER', v: 'admin' }); d({ type: 'CAP_SET', person: 'lara', hpw: 32, from: '2026-11-02' });
+  const p = S.people.find((x) => x.id === 'lara'); const M1 = R.resourceModel(S);
+  const before = M1.cap.lara[M1.idx['2026-10-26']].hpw; const after = M1.cap.lara[M1.idx['2026-11-02']].hpw;
+  return [!p0.capVerified && !p.capVerified && before === 24 && after === 32, `Lara 24 h → 32 h from Nov 2 (still illustrative)`];
+});
+step(3, 'TBD-owned work on the path to a phase finish marks the forecast "Resource owner unconfirmed"', () => {
+  const V = PF.projView(S, 'P2'); const ps = E.phaseSchedule(V, 'PH2');
+  return [!!ps.unconf && !!ps.ff, `Lakeside Phase 02 forecast ${ps.ff} · ${ps.unconf}`];
+});
+step(4, 'Planned finish is the earliest normal forecast; effort-driven tasks may finish earlier', () => {
+  const early = () => { let n = 0; PF.projectsOf(S).forEach((P) => { const V = PF.projView(S, P.id); const f = E.forecastAll(V); Object.values(V.tasks).forEach((t) => { const r = f[t.uid]; if (r?.kind === 'forecast' && r.finish && r.finish < t.pf && !t.accel) n++; }); }); return n; };
+  let pid, t; for (const P of PF.projectsOf(S)) { const V = PF.projView(S, P.id); const f = E.forecastAll(V); t = Object.values(V.tasks).find((x) => f[x.uid]?.floored && f[x.uid].rem > 0 && !E.children(V, x.uid).length); if (t) { pid = P.id; break; } }
+  d({ type: 'VIEWER', v: 'pm' }); d({ type: 'ACCEL', uid: t.uid, on: true }, pid);
+  const V2 = PF.projView(S, pid); const r = E.forecastAll(V2)[t.uid];
+  return [early() === 0 && r.finish < t.pf, `0 non-effort-driven tasks forecast early · ${V2.name} ${E.code(V2, t)} effort-driven: ${r.finish} < planned ${t.pf}`];
+});
+step(5, 'Utilization thresholds are configurable (default 70 / 90 / 100)', () => {
+  const d0 = { ...S.rp }; d({ type: 'VIEWER', v: 'admin' }); d({ type: 'RP_SET', patch: { over: 120 } });
+  const st = R.status(S, 110, 40, 44).label; d({ type: 'RP_SET', patch: { over: 100 } });
+  return [d0.available === 70 && d0.near === 90 && d0.over === 100 && st === 'Near capacity' && R.status(S, 110, 40, 44).label === 'Overallocated', '110% is "Near capacity" at a 120% limit, "Overallocated" at 100%'];
+});
+const decOk = results.slice(nBeforeDec).filter(Boolean).length; const decTotal = results.length - nBeforeDec;
+console.log(`Approved decisions: ${decOk}/${decTotal} passed`);
+ // Data rules
 const bad = [];
 if (S.people.some((p) => Object.keys(p).some((k) => /mail|phone|salary|rate|address/i.test(k)))) bad.push('staff contact/HR fields present');
 if (S.capEx.some((x) => !['Vacation', 'Unavailable', 'Training', 'Public Holiday'].includes(x.kind))) bad.push('non-generic availability category');
 console.log(bad.length ? `✗ data rules: ${bad.join('; ')}` : '✓ data rules: no staff contact/HR fields; generic availability categories only');
 const phases = E.livePhases(PF.projView(S, 'P1')).map((p) => `${E.pad(E.phaseNo(PF.projView(S, 'P1'), p.uid))} ${p.title}`);
 console.log(`Structure: ${phases.length} phases (${phases.join(' | ')})`);
-if (wfPassed !== wfTotal || rpOk !== rpPassed || bad.length || phases.length !== 6) { process.exitCode = 1; console.log('CHECK FAILED'); } else console.log('All checks passed');
+if (wfPassed !== wfTotal || rpOk !== rpPassed0 || decOk !== decTotal || bad.length || phases.length !== 6) { process.exitCode = 1; console.log('CHECK FAILED'); } else console.log('All checks passed');

@@ -7,7 +7,7 @@ import { St } from './rp.jsx';
 import { nextActions } from './wf.jsx';
 import { Reports } from './time.jsx';
 import { schedulePerformance } from './timeline.jsx';
-import { Badge, Btn, Bar, Illus, TypeMark, fmt, Section, Empty, Hrs, Days } from './ui.jsx';
+import { Badge, Btn, Bar, Illus, TypeMark, fmt, Section, Empty, Hrs, Days, Unconf } from './ui.jsx';
 
 const { useState, useMemo } = React;
 const { code, pad, whoLabel, TODAY } = E;
@@ -40,7 +40,7 @@ export function Portfolio({ S, dispatch, nav, ui }) {
       <Section title="Portfolio resources" right={<button className="linkish small" onClick={() => nav.area('resources')}>Open Resource Planning</button>}>
         <div className="kpis k6">
           <div><div className="lbl">Company utilization</div><b>{u}%</b><div className="sub">next 8 weeks · {Math.round(Dm)} of {Math.round(C)} h</div></div>
-          <div><div className="lbl">Overallocated this week</div><b>{over.length}</b><div className="sub">{over.map((x) => x.p.name).join(', ') || 'nobody'}</div></div>
+          <div><div className="lbl">Overallocated this week</div><b>{over.length}</b><div className="sub">{['admin', 'pm', 'exec'].includes(S.viewer) ? over.map((x) => x.p.name).join(', ') || 'nobody' : 'people above 100%'}</div></div>
           <div><div className="lbl">Available capacity</div><b><Hrs v={Math.round(C - Dm)} /></b><div className="sub">unallocated, next 8 weeks</div></div>
           <div><div className="lbl">Resource needed</div><b>{M.needed.length}</b><div className="sub">tasks with unassigned effort</div></div>
           <div><div className="lbl">Planned remaining hours</div><b><Hrs v={Math.round(planned)} /></b><div className="sub">all active projects</div></div>
@@ -72,8 +72,8 @@ export function Portfolio({ S, dispatch, nav, ui }) {
               <td>{blockers ? <Badge tone="bad">{blockers}</Badge> : '0'}</td>
               <td><Hrs v={est} /></td><td><Hrs v={Math.round(ap)} /></td>
               <td><Hrs v={Math.round(projLoad.find((x) => x.P.id === P.id)?.h || 0)} /></td>
-              <td>{aps?.uncertain ? <span className="twarn">uncertain</span> : <Days n={dv} />}</td>
-              <td>{sp.uncertain ? <span className="twarn" title={sp.uncertain}>Uncertain</span> : fmt(sp.ff)}</td>
+              <td>{aps?.uncertain ? <span className="twarn">uncertain</span> : <><Days n={dv} />{aps?.unconf && <> <Unconf why={aps.unconf} /></>}</>}</td>
+              <td>{sp.uncertain ? <span className="twarn" title={sp.uncertain}>Forecast uncertain</span> : <>{fmt(sp.ff)}{sp.unconf && <div><Unconf long why={sp.unconf} /></div>}</>}</td>
             </tr>;
           })}</tbody>
         </table></div>
@@ -111,7 +111,7 @@ export function Dashboard({ s, nav }) {
                   <td>{unscoped ? <span className="muted small">Not scoped</span> : <><Bar value={prog} w={90} /> <Illus>{prog}%</Illus></>}</td>
                   <td className="small">{g ? `${r.approved}/${r.total - 1}` : '—'}</td>
                   <td className="small">{unscoped ? '—' : fmt(ps.pf)}</td>
-                  <td className="small">{unscoped ? '—' : ps.af ? <>Released {fmt(ps.af)}</> : ps.uncertain ? <span className="twarn" title={ps.uncertain}>Uncertain</span> : <>{fmt(ps.ff)} <Days n={varPh(ps)} /></>}</td>
+                  <td className="small">{unscoped ? '—' : ps.af ? <>Released {fmt(ps.af)}</> : ps.uncertain ? <span className="twarn" title={ps.uncertain}>Uncertain</span> : <>{fmt(ps.ff)} <Days n={varPh(ps)} />{ps.unconf && <> <Unconf why={ps.unconf} /></>}</>}</td>
                   <td className="small">{unscoped ? '—' : <><Hrs v={ps.approved} /> / <Hrs v={ps.est} /></>}</td>
                   <td>{{ active: <Badge tone="accent">Active</Badge>, released: <Badge tone="ok">Released</Badge>, locked: <Badge>{unscoped ? 'Not scoped' : 'Locked'}</Badge> }[p.state]}</td>
                 </tr>);
@@ -123,7 +123,7 @@ export function Dashboard({ s, nav }) {
           <div className="kpis">
             <div><div className="lbl">Original planned completion</div><b>{fmt(sp.bf)}</b><div className="sub">Approved baseline, Design & Permitting</div></div>
             <div><div className="lbl">Current planned completion</div><b>{fmt(sp.pf)}</b><div className="sub"><Days n={E.workBetween(sp.bf, sp.pf, s.holidays)} /> vs baseline</div></div>
-            <div><div className="lbl">Forecast completion</div>{sp.uncertain ? <b className="twarn">Uncertain</b> : <b>{fmt(sp.ff)}</b>}<div className="sub">{sp.uncertain ? sp.uncertain : <><Days n={E.workBetween(sp.pf, sp.ff, s.holidays)} /> vs current plan</>}</div></div>
+            <div><div className="lbl">Forecast completion</div>{sp.uncertain ? <b className="twarn">Uncertain</b> : <b>{fmt(sp.ff)}</b>}<div className="sub">{sp.uncertain ? sp.uncertain : <><Days n={E.workBetween(sp.pf, sp.ff, s.holidays)} /> vs current plan{sp.unconf && <div><Unconf long why={sp.unconf} /></div>}</>}</div></div>
             <div><div className="lbl">Effort</div><b><Hrs v={sp.approved} /> of <Hrs v={sp.est} /></b><div className="sub"><Hrs v={sp.rem} /> remaining · <Hrs v={sp.pending} /> pending approval</div></div>
           </div>
           {sp.uncertain && <p className="note warn small">The forecast cannot be given as a date while this is unresolved. {sp.ff ? `Ignoring it, the rules would give ${fmt(sp.ff)}.` : ''} Phase 06 is not scoped and is excluded.</p>}
@@ -132,7 +132,7 @@ export function Dashboard({ s, nav }) {
               {sp.blocked.map((t) => <li key={'b' + t.uid}><span className="dot bad" /><button className="linkish" onClick={() => nav.timeline(t.uid)}><span className="mono">{code(s, t)}</span> {t.title}</button><span className="twarn">{t.blocker || 'On hold'}</span></li>)}
               {sp.drivers.map(({ t, d }) => <li key={t.uid}><span className="dot warn" /><button className="linkish" onClick={() => nav.timeline(t.uid)}><span className="mono">{code(s, t)}</span> {t.title}</button><Days n={d} /></li>)}</ul> : <Empty>No task is forecast later than plan.</Empty>}</div>
             <div><h4>Estimated vs approved hours by phase</h4><table className="grid-table small num-right"><thead><tr><th>Phase</th><th>Est.</th><th>Approved</th><th>Remaining</th><th>Finish var.</th></tr></thead><tbody>
-              {sp.rows.map((r) => <tr key={r.p.uid}><td>{pad(E.phaseNo(s, r.p.uid))}</td><td><Hrs v={r.est} /></td><td><Hrs v={r.approved} /></td><td><Hrs v={r.rem} /></td><td>{r.uncertain && !r.af ? <span className="var unc">uncertain</span> : <Days n={varPh(r)} />}</td></tr>)}</tbody></table></div>
+              {sp.rows.map((r) => <tr key={r.p.uid}><td>{pad(E.phaseNo(s, r.p.uid))}</td><td><Hrs v={r.est} /></td><td><Hrs v={r.approved} /></td><td><Hrs v={r.rem} /></td><td>{r.uncertain && !r.af ? <span className="var unc">uncertain</span> : <><Days n={varPh(r)} />{r.unconf && !r.af && <> <Unconf why={r.unconf} /></>}</>}</td></tr>)}</tbody></table></div>
           </div>
         </Section>
 
@@ -190,7 +190,7 @@ export function MyWork({ s, nav, dispatch }) {
               <tr key={t.uid}><td><button className="linkish" onClick={() => nav.task(t.uid)}><TypeMark type={t.type} /> <span className="mono">{code(s, t)}</span> {t.title}</button>{t.parent && <div className="muted">in {code(s, s.tasks[t.parent])} {s.tasks[t.parent].title}</div>}</td>
                 <td>{E.resolve(s, t.owner) === me ? 'Accountable' : 'Contributor'}</td>
                 <td>{fmt(t.ps)} – {fmt(t.pf)}{locked && <div className="muted">phase locked</div>}</td>
-                <td>{r.uncertain ? <span className="twarn" title={r.uncertain}>Uncertain</span> : r.finish ? <>{fmt(r.finish)} <Days n={E.workBetween(t.pf, r.finish, s.holidays)} /></> : '—'}</td>
+                <td>{r.uncertain ? <span className="twarn" title={r.uncertain}>Uncertain</span> : r.finish ? <>{fmt(r.finish)} <Days n={E.workBetween(t.pf, r.finish, s.holidays)} />{r.unconf && <> <Unconf why={r.unconf} /></>}</> : '—'}</td>
                 <td>{E.pctOf(s, t)}%</td><td><Hrs v={h.approved} /> / <Hrs v={t.est} />{h.pending > 0 && <div className="twarn">+<Hrs v={h.pending} /> pending</div>}</td></tr>); })}
           </tbody></table></div> : <Empty>No open tasks.</Empty>}
         </Section>

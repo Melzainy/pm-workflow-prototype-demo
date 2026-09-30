@@ -47,47 +47,50 @@ export function ResourcePlanning({ S, dispatch, ui, setUi, nav }) {
   const me = ['admin', 'pm', 'exec'].includes(S.viewer) ? null : S.viewer; // team members see their own workload
   const canEdit = S.viewer === 'admin' || S.viewer === 'pm';
   const weeks = M.weeks.slice(i0, i1 + 1);
-  const people = R.companyPeople(S).filter((p) => !me || p.id === me);
-  const q = (rp.q || '').trim().toLowerCase();
-  const rows = people.map((p) => ({ p, disc: R.discOf(S, p), w: personWeeks(S, M, p.id, f, i0, i1) }))
+  const people = R.companyPeople(S);
+  const q = me ? '' : (rp.q || '').trim().toLowerCase();
+  const fx = me ? { ...f, person: '', onlyOver: false, onlyAvail: false } : f;
+  const allRows = people.map((p) => ({ p, disc: R.discOf(S, p), w: personWeeks(S, M, p.id, f, i0, i1) }))
     .map((r) => { const C = r.w.reduce((a, x) => a + x.cap.avail, 0); const Dm = r.w.reduce((a, x) => a + x.d, 0); const u = C > 0 ? r0((Dm / C) * 100) : Dm > 0 ? 999 : 0; return { ...r, C, Dm, u, st: R.status(S, u, C, Dm) }; })
-    .filter((r) => (!f.disc || r.disc === f.disc || R.secondaryDiscs(S, r.p).includes(f.disc)) && (!f.person || r.p.id === f.person)
-      && (!f.onlyOver || r.w.some((x) => x.st.key === 'over')) && (!f.onlyAvail || r.st.key === 'avail')
-      && (!f.project || r.Dm > 0 || f.showZero) && (!q || r.p.name.toLowerCase().includes(q) || r.w.some((x) => x.items.some(({ row }) => `${row.title} ${row.projName} ${row.code}`.toLowerCase().includes(q)))));
-  const discs = R.DISCIPLINES.map(([d, name]) => ({ d, name, rows: rows.filter((r) => r.disc === d) })).filter((g) => (!f.disc || g.d === f.disc));
+    .filter((r) => (!fx.disc || r.disc === fx.disc || R.secondaryDiscs(S, r.p).includes(fx.disc)) && (!fx.person || r.p.id === fx.person)
+      && (!fx.onlyOver || r.w.some((x) => x.st.key === 'over')) && (!fx.onlyAvail || r.st.key === 'avail')
+      && (!fx.project || r.Dm > 0 || fx.showZero || r.p.id === me) && (!q || r.p.name.toLowerCase().includes(q) || r.w.some((x) => x.items.some(({ row }) => `${row.title} ${row.projName} ${row.code}`.toLowerCase().includes(q)))));
+  // Team members: own detailed rows only; discipline/company figures stay aggregated across everyone.
+  const rows = me ? allRows.filter((r) => r.p.id === me) : allRows;
+  const discs = R.DISCIPLINES.map(([d, name]) => ({ d, name, all: allRows.filter((r) => r.disc === d), rows: rows.filter((r) => r.disc === d) })).filter((g) => (!f.disc || g.d === f.disc));
   const neededAll = M.needed.filter((n) => (!f._proj || f._proj.has(n.proj)) && (!f.project || n.proj === f.project) && (!f.phase || n.phaseNo === Number(f.phase)) && (!f.disc || n.need === f.disc));
   const open = rp.open || {};
   const toggle = (k) => set({ open: { ...open, [k]: !open[k] } });
   const sel = rp.sel;
-  const pick = (x) => set({ sel: x });
+  const pick = (x) => { if (me && x && (x.kind === 'person' || x.kind === 'cell') && x.id !== me) return; set({ sel: x }); };
   return (
     <div className="page">
       <div className="page-h"><div><h1>Resource planning</h1><p className="muted">Company-wide workload from every project's tasks, assignments, allocations, plans, capacity and timesheets. <Illus>All capacity, allocations and hours are illustrative, not verified.</Illus></p></div>
         {S.viewer === 'admin' && <button className="linkish small" onClick={() => pick({ kind: 'settings' })}>Resource settings</button>}</div>
-      {me && <p className="note small">Team-member view: you see your own assignments and future workload. Management and PMs see the whole company.</p>}
-      <Controls S={S} rp={rp} set={set} f={f0} setF={setF} />
-      <Summary S={S} M={M} i0={i0} i1={i1} rows={rows} needed={neededAll} me={me} />
+      {me && <p className="note small">Team-member view: your own assignments and workload in detail, plus discipline and company totals. Person-level detail for colleagues is visible to Administrators, PMs and Executive Management.</p>}
+      <Controls S={S} rp={rp} set={set} f={f0} setF={setF} me={me} />
+      <Summary S={S} M={M} i0={i0} i1={i1} rows={allRows} needed={neededAll} me={me} />
       <div className="seg rp-view" role="group" aria-label="Group by">
         {[['person', 'By person'], ['disc', 'By discipline'], ['project', 'By project']].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} aria-pressed={view === k} onClick={() => set({ view: k })}>{l}</button>)}
       </div>
       {f.onlyUnassigned ? null : view === 'person' ? (
         <Board S={S} M={M} weeks={weeks} i0={i0} discs={discs} open={open} toggle={toggle} pick={pick} sel={sel} f={f} me={me} />
       ) : view === 'disc' ? (
-        <DiscTable S={S} M={M} weeks={weeks} i0={i0} i1={i1} discs={discs} rows={rows} pick={pick} open={open} toggle={toggle} f={f} />
+        <DiscTable S={S} M={M} weeks={weeks} i0={i0} i1={i1} discs={discs} rows={rows} pick={pick} open={open} toggle={toggle} f={f} me={me} />
       ) : <ProjectTable S={S} M={M} i0={i0} i1={i1} f={f} open={open} toggle={toggle} pick={pick} nav={nav} me={me} />}
       <Needed S={S} items={neededAll} notDefined={M.notDefined.filter((n) => (!f.project || n.proj === f.project))} nav={nav} i0={i0} i1={i1} M={M} me={me} />
       <p className="small muted">Weekly availability = standard weekly capacity × working days ÷ 5 − unavailable days (holidays, vacation, training). Workload = each task's remaining effort, split by the allocations entered on the task (or an illustrative equal split, labelled), spread over the working days of its current plan from today. Hours logged never change task progress.</p>
       {sel && <Drawer close={() => pick(null)} label={sel.kind === 'person' ? 'Person detail' : sel.kind === 'cell' ? 'Week detail' : sel.kind === 'disc' ? 'Discipline detail' : 'Resource settings'}>
         {sel.kind === 'person' && <PersonPanel S={S} M={M} pid={sel.id} dispatch={dispatch} nav={nav} canEdit={canEdit} i0={i0} i1={i1} pick={pick} />}
         {sel.kind === 'cell' && <WeekPanel S={S} M={M} pid={sel.id} i={sel.i} nav={nav} pick={pick} />}
-        {sel.kind === 'disc' && <DiscPanel S={S} M={M} d={sel.id} i0={i0} i1={i1} nav={nav} pick={pick} />}
+        {sel.kind === 'disc' && <DiscPanel S={S} M={M} d={sel.id} i0={i0} i1={i1} nav={nav} pick={pick} me={me} />}
         {sel.kind === 'settings' && <Settings S={S} dispatch={dispatch} />}
       </Drawer>}
     </div>
   );
 }
 
-function Controls({ S, rp, set, f, setF }) {
+function Controls({ S, rp, set, f, setF, me }) {
   const n = rp.range ?? S.rp.horizon ?? 8;
   const ps = projectsOf(S, true);
   return (
@@ -95,14 +98,14 @@ function Controls({ S, rp, set, f, setF }) {
       <div className="seg" role="group" aria-label="Date range">{RANGES.map(([k, l]) => <button key={k} className={n === k ? 'on' : ''} aria-pressed={n === k} onClick={() => set({ range: k })}>{l}</button>)}</div>
       {n === 0 && <span className="row small"><label>From <input type="date" id="rp-from" value={rp.from || E.TODAY} onChange={(e) => set({ from: e.target.value })} /></label><label>To <input type="date" id="rp-to" value={rp.to || E.addDays(E.TODAY, 49)} onChange={(e) => set({ to: e.target.value })} /></label></span>}
       <div className="filters wrap rp-filters">
-        <label>Search<input id="rp-q" value={rp.q || ''} placeholder="Person, task or project" onChange={(e) => set({ q: e.target.value })} /></label>
+        {!me && <label>Search<input id="rp-q" value={rp.q || ''} placeholder="Person, task or project" onChange={(e) => set({ q: e.target.value })} /></label>}
         <label>Discipline<select id="rp-disc" value={f.disc || ''} onChange={(e) => setF({ disc: e.target.value })}><option value="">All</option>{R.DISCIPLINES.map(([d, l]) => <option key={d} value={d}>{l}</option>)}</select></label>
-        <label>Person<select id="rp-person" value={f.person || ''} onChange={(e) => setF({ person: e.target.value })}><option value="">All</option>{R.companyPeople(S).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        {!me && <label>Person<select id="rp-person" value={f.person || ''} onChange={(e) => setF({ person: e.target.value })}><option value="">All</option>{R.companyPeople(S).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
         <label>Project<select id="rp-project" value={f.project || ''} onChange={(e) => setF({ project: e.target.value })}><option value="">All</option>{ps.filter((p) => !f.active || p.status === 'active').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <label>Project Manager<select id="rp-pm" value={f.pm || ''} onChange={(e) => setF({ pm: e.target.value })}><option value="">All</option><option value="tbd">TBD (not assigned)</option></select></label>
         <label>Phase<select id="rp-phase" value={f.phase || ''} onChange={(e) => setF({ phase: e.target.value })}><option value="">All</option>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{E.pad(n)}</option>)}</select></label>
-        <label className="check small"><input type="checkbox" id="rp-over" checked={!!f.onlyOver} onChange={(e) => setF({ onlyOver: e.target.checked })} /> Overallocated only</label>
-        <label className="check small"><input type="checkbox" id="rp-avail" checked={!!f.onlyAvail} onChange={(e) => setF({ onlyAvail: e.target.checked })} /> Available only</label>
+        {!me && <><label className="check small"><input type="checkbox" id="rp-over" checked={!!f.onlyOver} onChange={(e) => setF({ onlyOver: e.target.checked })} /> Overallocated only</label>
+        <label className="check small"><input type="checkbox" id="rp-avail" checked={!!f.onlyAvail} onChange={(e) => setF({ onlyAvail: e.target.checked })} /> Available only</label></>}
         <label className="check small"><input type="checkbox" id="rp-unas" checked={!!f.onlyUnassigned} onChange={(e) => setF({ onlyUnassigned: e.target.checked })} /> Unassigned work only</label>
         <label className="check small"><input type="checkbox" id="rp-active" checked={!!f.active} onChange={(e) => setF({ active: e.target.checked })} /> Active projects only</label>
       </div>
@@ -113,7 +116,7 @@ function Controls({ S, rp, set, f, setF }) {
 function Summary({ S, M, i0, i1, rows, needed, me }) {
   const ps = projectsOf(S);
   const C = rows.reduce((a, r) => a + r.C, 0); const Dm = rows.reduce((a, r) => a + r.Dm, 0);
-  const wk0 = rows.map((r) => r.w[0]).filter(Boolean);
+  const wk0 = rows.map((r) => r.w[0]).filter(Boolean); // counts only, never names, in the summary
   const cnt = (k) => wk0.filter((x) => x.st.key === k).length;
   const unas = needed.reduce((a, n) => a + weeksHours(M, n, i0, i1), 0);
   const back = E.addDays(E.weekOf(E.TODAY), -28);
@@ -159,17 +162,18 @@ function Board({ S, M, weeks, i0, discs, open, toggle, pick, f, me }) {
         <thead><tr><th className="rname">Person</th><th className="rsum">Range</th>{weeks.map((w) => <th key={w} className="rwk"><b>{R.wkLabel(w)}</b><span>{fmt(w)}</span></th>)}</tr></thead>
         <tbody>
           {discs.map((g) => {
-            const isOpen = open[g.d] ?? !!me;
-            const agg = weeks.map((w, k) => { const i = i0 + k; const c = g.rows.reduce((a, r) => a + r.w[k].cap.avail, 0); const d = g.rows.reduce((a, r) => a + r.w[k].d, 0); const u = c > 0 ? r0((d / c) * 100) : d > 0 ? 999 : 0; return { i, cap: { avail: c, off: 0, kinds: [] }, d, u, st: R.status(S, u, c, d) }; });
+            const isOpen = open[g.d] ?? (!!me && g.rows.length > 0);
+            const agg = weeks.map((w, k) => { const i = i0 + k; const c = g.all.reduce((a, r) => a + r.w[k].cap.avail, 0); const d = g.all.reduce((a, r) => a + r.w[k].d, 0); const u = c > 0 ? r0((d / c) * 100) : d > 0 ? 999 : 0; return { i, cap: { avail: c, off: 0, kinds: [] }, d, u, st: R.status(S, u, c, d) }; });
             const C = agg.reduce((a, x) => a + x.cap.avail, 0); const Dm = agg.reduce((a, x) => a + x.d, 0); const u = C > 0 ? r0((Dm / C) * 100) : Dm > 0 ? 999 : 0;
             const un = M.unassigned[g.d];
-            if (!g.rows.length && !un && (f.onlyOver || f.onlyAvail || f.person || me)) return null;
+            if (!g.all.length && !un && (f.onlyOver || f.onlyAvail || f.person)) return null;
+            if (!me && !g.rows.length && (f.onlyOver || f.onlyAvail || f.person)) return null;
             return [
               <tr key={g.d} className="rgroup">
                 <th className="rname"><button className="tw" aria-expanded={!!isOpen} aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${g.name}`} onClick={() => toggle(g.d)}>{isOpen ? '▾' : '▸'}</button>
-                  <button className="linkish" onClick={() => pick({ kind: 'disc', id: g.d })}><b>{g.name}</b></button> <span className="muted small">{g.rows.length} {g.rows.length === 1 ? 'person' : 'people'}</span></th>
-                <td className="rsum">{g.rows.length ? <><b>{pctTxt(u)}</b> <St st={R.status(S, u, C, Dm)} compact /><div className="small muted">{r0(Dm)}/{r0(C)} h</div></> : <span className="small muted">No people</span>}</td>
-                {agg.map((x) => <td key={x.i}>{g.rows.length ? <div className={`rcell grp ${x.st.key}`}><span className="rpct">{x.u >= 999 ? '—' : `${x.u}%`}<i aria-hidden="true">{x.st.mark}</i></span></div> : null}</td>)}
+                  <button className="linkish" onClick={() => pick({ kind: 'disc', id: g.d })}><b>{g.name}</b></button> <span className="muted small">{g.all.length} {g.all.length === 1 ? 'person' : 'people'}</span></th>
+                <td className="rsum">{g.all.length ? <><b>{pctTxt(u)}</b> <St st={R.status(S, u, C, Dm)} compact /><div className="small muted">{r0(Dm)}/{r0(C)} h</div></> : <span className="small muted">No people</span>}</td>
+                {agg.map((x) => <td key={x.i}>{g.all.length ? <div className={`rcell grp ${x.st.key}`}><span className="rpct">{x.u >= 999 ? '—' : `${x.u}%`}<i aria-hidden="true">{x.st.mark}</i></span></div> : null}</td>)}
               </tr>,
               ...(isOpen ? g.rows.map((r) => (
                 <tr key={r.p.id} className="rperson">
@@ -191,23 +195,23 @@ function Board({ S, M, weeks, i0, discs, open, toggle, pick, f, me }) {
   );
 }
 
-function DiscTable({ S, M, weeks, i0, i1, discs, rows, pick, open, toggle, f }) {
+function DiscTable({ S, M, weeks, i0, i1, discs, rows, pick, open, toggle, f, me }) {
   return (
     <div className="rp-board" role="region" aria-label="Discipline summary" tabIndex={0}>
       <table className="rtable disc">
         <thead><tr><th className="rname">Discipline</th><th>People</th><th>Capacity / wk</th><th>Assigned</th><th>Available</th><th>Utilization</th><th>Over · near · avail. (range)</th><th>Unassigned tasks</th><th>Top projects</th>{weeks.slice(0, 8).map((w) => <th key={w} className="rwk"><b>{R.wkLabel(w)}</b></th>)}</tr></thead>
         <tbody>{discs.map((g) => {
-          const s = discStats(S, M, g.d, g.rows, i0, i1);
+          const s = discStats(S, M, g.d, g.all, i0, i1);
           const isOpen = !!open['d' + g.d];
           return [
             <tr key={g.d} className="rgroup">
               <th className="rname"><button className="tw" aria-expanded={isOpen} aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${g.name}`} onClick={() => toggle('d' + g.d)}>{isOpen ? '▾' : '▸'}</button><button className="linkish" onClick={() => pick({ kind: 'disc', id: g.d })}><b>{g.name}</b></button></th>
-              <td>{g.rows.length}</td><td>{r0(s.capWk)} h</td><td>{r0(s.Dm)} h</td><td>{r0(s.C - s.Dm)} h</td>
-              <td>{g.rows.length ? <><b>{s.u}%</b> <St st={s.st} compact /></> : '—'}</td>
+              <td>{g.all.length}</td><td>{r0(s.capWk)} h</td><td>{r0(s.Dm)} h</td><td>{r0(s.C - s.Dm)} h</td>
+              <td>{g.all.length ? <><b>{s.u}%</b> <St st={s.st} compact /></> : '—'}</td>
               <td className="small">{s.over} · {s.near} · {s.avail}</td>
               <td>{s.needed ? <Badge tone="warn">{s.needed}</Badge> : '0'}</td>
               <td className="small">{s.top.slice(0, 2).map(([p, h]) => `${S.projects[p]?.name} ${r0(h)} h`).join(' · ') || '—'}</td>
-              {s.weekly.slice(0, 8).map((x, k) => <td key={k}>{g.rows.length ? <span className={`rcell grp ${x.st.key}`}><span className="rpct">{x.u >= 999 ? '—' : `${x.u}%`}<i aria-hidden="true">{x.st.mark}</i></span></span> : null}</td>)}
+              {s.weekly.slice(0, 8).map((x, k) => <td key={k}>{g.all.length ? <span className={`rcell grp ${x.st.key}`}><span className="rpct">{x.u >= 999 ? '—' : `${x.u}%`}<i aria-hidden="true">{x.st.mark}</i></span></span> : null}</td>)}
             </tr>,
             ...(isOpen ? g.rows.map((r) => <tr key={r.p.id} className="rperson"><th className="rname"><button className="linkish" onClick={() => pick({ kind: 'person', id: r.p.id })}>{r.p.name}</button></th>
               <td /><td>{r0(r.C / (i1 - i0 + 1))} h</td><td>{r0(r.Dm)} h</td><td>{r0(r.C - r.Dm)} h</td><td><b>{pctTxt(r.u)}</b> <St st={r.st} compact /></td><td colSpan={3} />
@@ -235,8 +239,8 @@ function ProjectTable({ S, M, i0, i1, f, open, toggle, pick, nav, me }) {
   return (
     <Section title="Resource demand by project" right={<span className="small muted">{R.wkLabel(M.weeks[i0])}–{R.wkLabel(M.weeks[i1])}</span>}>
       <ul className="plain rproj">{ps.map((P) => {
-        const rows = M.assignments.filter((a) => a.proj === P.id && (!f.phase || a.phaseNo === Number(f.phase)) && (!me || a.pid === me));
-        const byD = {}; rows.forEach((a) => { const h = inR(a); if (!h) return; const d = a.pid ? a.udisc : a.udisc; (byD[d] ||= { h: 0, people: {} }).h += h; const k = a.pid || `tbd:${a.role}`; byD[d].people[k] = (byD[d].people[k] || 0) + h; });
+        const rows = M.assignments.filter((a) => a.proj === P.id && (!f.phase || a.phaseNo === Number(f.phase)));
+        const byD = {}; rows.forEach((a) => { const h = inR(a); if (!h) return; const d = a.pid ? a.udisc : a.udisc; (byD[d] ||= { h: 0, people: {} }).h += h; const k = a.pid ? (me && a.pid !== me ? 'others' : a.pid) : `tbd:${a.role}`; byD[d].people[k] = (byD[d].people[k] || 0) + h; });
         const tot = Object.values(byD).reduce((a, x) => a + x.h, 0);
         const po = !!open['p' + P.id];
         return <li key={P.id}>
@@ -245,7 +249,7 @@ function ProjectTable({ S, M, i0, i1, f, open, toggle, pick, nav, me }) {
             const dk = `p${P.id}${d}`; const dopen = !!open[dk];
             return <li key={d}><div className="row between"><span><button className="tw" aria-expanded={dopen} onClick={() => toggle(dk)}>{dopen ? '▾' : '▸'}</button>{l}</span><Hrs v={r0(byD[d].h)} /></div>
               {dopen && <ul className="plain rproj-p">{Object.entries(byD[d].people).sort((a, b) => b[1] - a[1]).map(([k, h]) => <li key={k} className="row between">
-                {k.startsWith('tbd:') ? <span className="muted">{E.roleLabel(k.slice(4))} (TBD)</span> : <button className="linkish" onClick={() => pick({ kind: 'person', id: k })}>{S.people.find((p) => p.id === k)?.name}</button>}<Hrs v={r0(h)} /></li>)}</ul>}
+                {k === 'others' ? <span className="muted">Colleagues (combined)</span> : k.startsWith('tbd:') ? <span className="muted">{E.roleLabel(k.slice(4))} (TBD)</span> : <button className="linkish" onClick={() => pick({ kind: 'person', id: k })}>{S.people.find((p) => p.id === k)?.name}</button>}<Hrs v={r0(h)} /></li>)}</ul>}
             </li>;
           })}{!tot && <li className="muted small">No remaining work in this range.</li>}</ul>}
         </li>;
@@ -257,7 +261,6 @@ function ProjectTable({ S, M, i0, i1, f, open, toggle, pick, nav, me }) {
 function Needed({ S, items, notDefined, nav, i0, i1, M, me }) {
   const [openG, setOpenG] = useState({});
   const [showND, setShowND] = useState(false);
-  if (me) return null;
   const groups = {}; items.forEach((n) => { (groups[n.reason] ||= []).push(n); });
   const order = Object.keys(groups).sort((a, b) => (a === 'Missing Project Manager') - (b === 'Missing Project Manager') || groups[b].length - groups[a].length);
   return (
@@ -386,7 +389,7 @@ function WeekPanel({ S, M, pid, i, nav, pick }) {
   );
 }
 
-function DiscPanel({ S, M, d, i0, i1, nav, pick }) {
+function DiscPanel({ S, M, d, i0, i1, nav, pick, me }) {
   const people = R.companyPeople(S).filter((p) => R.discOf(S, p) === d);
   const rows = people.map((p) => { const w = personWeeks(S, M, p.id, {}, i0, i1); const C = w.reduce((a, x) => a + x.cap.avail, 0); const Dm = w.reduce((a, x) => a + x.d, 0); const u = C > 0 ? r0((Dm / C) * 100) : Dm > 0 ? 999 : 0; return { p, w, C, Dm, u, st: R.status(S, u, C, Dm) }; });
   const s = discStats(S, M, d, rows, i0, i1);
@@ -405,7 +408,8 @@ function DiscPanel({ S, M, d, i0, i1, nav, pick }) {
       <h4>Workload trend</h4>
       <div className="rmini">{s.weekly.map((x, k) => <span key={k} className={`rmini-c ${x.st.key}`}><span className="rmini-b"><i style={{ height: `${Math.min(100, x.u >= 999 ? 100 : x.u)}%` }} /></span><span className="rmini-l">{R.wkLabel(M.weeks[i0 + k])}</span><span className="rmini-v">{rows.length ? (x.u >= 999 ? '—' : `${x.u}%`) : '—'}</span></span>)}</div>
       <h4>Team members</h4>
-      {rows.length ? <ul className="plain small list">{rows.map((r) => <li key={r.p.id}><button className="linkish" onClick={() => pick({ kind: 'person', id: r.p.id })}>{r.p.name}</button><span>{pctTxt(r.u)} <St st={r.st} /></span></li>)}</ul> : <Empty>No one in the roster has this primary discipline.</Empty>}
+      {!rows.length ? <Empty>No one in the roster has this primary discipline.</Empty> : me ? <p className="small">{rows.length} people · {s.over} overallocated · {s.near} near capacity · {s.avail} available <span className="muted">(individual workloads are visible to Administrators, PMs and Executive Management)</span></p>
+        : <ul className="plain small list">{rows.map((r) => <li key={r.p.id}><button className="linkish" onClick={() => pick({ kind: 'person', id: r.p.id })}>{r.p.name}</button><span>{pctTxt(r.u)} <St st={r.st} /></span></li>)}</ul>}
       <h4>Projects consuming {R.discName(d)}</h4>
       {s.top.length ? <ul className="plain small list">{s.top.map(([p, h]) => <li key={p}><span>{S.projects[p]?.name}</span><Hrs v={r0(h)} /></li>)}</ul> : <Empty>None in range.</Empty>}
       <h4>Upcoming deadlines (4 weeks)</h4>

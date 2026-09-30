@@ -1,5 +1,5 @@
 import * as E from './engine.js';
-import { Badge, Btn, fmt, Section, Hrs, Days } from './ui.jsx';
+import { Badge, Btn, fmt, Section, Hrs, Days, Unconf } from './ui.jsx';
 
 const { useState, useMemo, useEffect } = React;
 const { code, pad, TODAY } = E;
@@ -69,7 +69,7 @@ export function Timeline({ s, dispatch, ui, setUi, nav }) {
   const variance = (t) => {
     const r = f[t.uid] || {};
     if (E.done(s, t)) return <Days n={E.workBetween(t.pf, t.af, s.holidays)} />;
-    if (mode === 'forecast') return r.uncertain ? <span className="var unc" title={r.uncertain}>uncertain</span> : r.finish ? <Days n={E.workBetween(t.pf, r.finish, s.holidays)} /> : null;
+    if (mode === 'forecast') return r.uncertain ? <span className="var unc" title={r.uncertain}>uncertain</span> : r.finish ? <span className="varstack"><Days n={E.workBetween(t.pf, r.finish, s.holidays)} />{r.unconf && <Unconf why={r.unconf} />}</span> : null;
     if (mode === 'actual' && r.aStart) return <Days n={E.workBetween(t.ps, r.aStart, s.holidays)} />;
     return null;
   };
@@ -108,7 +108,7 @@ export function Timeline({ s, dispatch, ui, setUi, nav }) {
                 <div key={p.uid} className="tl-row tl-phase" role="row">
                   <div className="tl-label"><button className="tw" aria-expanded={!!open[p.uid]} onClick={() => toggle(p.uid)}>{open[p.uid] ? '▾' : '▸'}</button><span className="mono">{pad(E.phaseNo(s, p.uid))}</span> <b>{p.title}</b>
                     <div className="small muted">{unscoped ? 'Not yet scoped · excluded from forecasts' : <>{p.state === 'released' ? 'Released' : p.state === 'active' ? 'Active' : 'Locked'} · <Hrs v={ps.approved} /> of <Hrs v={ps.est} /> est.{ps.pending ? <> · <Hrs v={ps.pending} /> pending</> : null}</>}</div></div>
-                  <div className="tl-var">{unscoped ? null : p.state === 'released' ? <Days n={E.workBetween(ps.pf, ps.af, s.holidays)} /> : mode === 'forecast' ? (ps.uncertain ? <span className="var unc" title={ps.uncertain}>uncertain</span> : <Days n={E.workBetween(ps.pf, ps.ff, s.holidays)} />) : null}</div>
+                  <div className="tl-var">{unscoped ? null : p.state === 'released' ? <Days n={E.workBetween(ps.pf, ps.af, s.holidays)} /> : mode === 'forecast' ? (ps.uncertain ? <span className="var unc" title={ps.uncertain}>uncertain</span> : <span className="varstack"><Days n={E.workBetween(ps.pf, ps.ff, s.holidays)} />{ps.unconf && <Unconf why={ps.unconf} />}</span>) : null}</div>
                   <div className="tl-track" style={{ width }}>
                     <Today x={x} />
                     {!unscoped && <Bars plan={[ps.ps, ps.pf]} baseline={[ps.bs, ps.bf]} actual={ps.as ? [ps.as, ps.af || TODAY] : null} done={!!ps.af} fc={!ps.af && ps.ff ? [ps.as || ps.ps, ps.ff] : null} uncertain={ps.uncertain} />}
@@ -150,7 +150,8 @@ export function Timeline({ s, dispatch, ui, setUi, nav }) {
           <li>• Remaining effort = PM-entered value, otherwise estimate × (1 − progress). Hours logged never change progress.</li>
           <li>• Each assignee's share of the remaining effort comes from the allocation entered on the task (hours or %). Without one, the effort is split equally and labelled "allocation not defined".</li>
           <li>• Weekly rate = the planned rate for that share over the task's current window, scaled by the person's capacity ÷ total demand across all projects in those weeks (Resource Planning), and never above their weekly availability. Vacation, holidays and overload therefore slow the forecast. The PM can override any rate.</li>
-          <li>• Roles not yet assigned to a person are forecast at their planned rate and labelled as an assumption.</li>
+          <li>• Roles not yet assigned to a person are forecast at their planned rate. If such work sets a phase's finish, the phase forecast is marked "Resource owner unconfirmed".</li>
+          <li>• The planned finish is the earliest normal forecast. A task can be forecast earlier only if the PM marks it effort-driven / acceleratable.</li>
           <li>• A task starts no earlier than today, its planned start, its dependencies' forecast finish, and the forecast release of the previous phase gate.</li>
           <li>• Weekends and holidays ({s.holidays.map(fmt).join(', ')}) are skipped. Blockers, holds and missing capacity make a forecast uncertain instead of guessing.</li>
           <li>• Actual bars use approved hours only. Submitted hours show separately. Gates, not hours or forecasts, complete a phase.</li>
@@ -188,7 +189,11 @@ function TaskPanel({ s, t, dispatch, nav, close }) {
         <tr><th>{d ? 'Actual finish' : 'Last approved work'}</th><td>{d ? <>{fmt(t.af)} <Days n={E.workBetween(t.pf, t.af, s.holidays)} /></> : f.lastAct ? fmt(f.lastAct) : '—'}</td></tr>
         {elapsed && <tr><th>Elapsed</th><td>{elapsed} working days</td></tr>}
         <tr><th>Progress</th><td>{E.pctOf(s, t)}% <span className="muted">(set in Workflow, independent of hours)</span></td></tr>
-        {!d && <tr><th>Forecast</th><td>{f.uncertain ? <span className="twarn">Uncertain · {f.uncertain}</span> : f.finish ? <>{fmt(f.start)} – <b>{fmt(f.finish)}</b> <Days n={E.workBetween(t.pf, f.finish, s.holidays)} /></> : '—'}{f.cond?.length > 0 && <div className="muted">Assumes {f.cond.join(', ')} on forecast</div>}</td></tr>}
+        {!d && <tr><th>Forecast</th><td>{f.uncertain ? <span className="twarn">Uncertain · {f.uncertain}</span> : f.finish ? <>{fmt(f.start)} – <b>{fmt(f.finish)}</b> <Days n={E.workBetween(t.pf, f.finish, s.holidays)} /></> : '—'}{f.cond?.length > 0 && <div className="muted">Assumes {f.cond.join(', ')} on forecast</div>}
+          {f.unconf && <div><Unconf long why={f.unconf} /> <span className="muted">{f.unconf}</span></div>}
+          {f.floored && <div className="muted">Capacity would allow earlier; held at the planned finish (not effort-driven).</div>}
+          {f.accel && <div className="muted">Effort-driven: may finish before the planned finish.</div>}
+          {pm && <label className="check small"><input type="checkbox" id="tl-accel" checked={!!t.accel} onChange={(e) => dispatch({ type: 'ACCEL', uid: t.uid, on: e.target.checked })} /> Effort-driven / acceleratable (allow finishing before the planned finish)</label>}</td></tr>}
       </tbody></table>
       <h4>Effort</h4>
       <table className="kv small"><tbody>
@@ -240,6 +245,6 @@ export function schedulePerformance(s) {
   const drivers = Object.values(s.tasks).filter((t) => !t.archived && !E.done(s, t) && f[t.uid]?.finish && f[t.uid].finish > t.pf)
     .map((t) => ({ t, d: E.workBetween(t.pf, f[t.uid].finish, s.holidays) })).sort((a, b) => b.d - a.d).slice(0, 4);
   const blocked = Object.values(s.tasks).filter((t) => !t.archived && !E.done(s, t) && (t.blocker || t.hold));
-  return { rows, bf, pf, ff: last?.ff, uncertain: unc?.uncertain, drivers, blocked,
+  return { rows, bf, pf, ff: last?.ff, uncertain: unc?.uncertain, unconf: last?.unconf, drivers, blocked,
     est: rows.reduce((a, r) => a + r.est, 0), approved: rows.reduce((a, r) => a + r.approved, 0), rem: rows.reduce((a, r) => a + r.rem, 0), pending: rows.reduce((a, r) => a + r.pending, 0) };
 }

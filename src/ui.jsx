@@ -65,5 +65,7 @@ export function MultiWho({ s, id, values, onChange, disabled, title }) {
     </div>
   );
 }
+// A forecast that depends on work whose owner (a TBD role) is not yet confirmed.
+export const Unconf = ({ why, long }) => <span className="var tbd" title={`Resource owner unconfirmed${why ? `: ${why}` : ''}`}>{long ? 'Resource owner unconfirmed' : 'owner TBD'}</span>;
 export const Req = ({ req }) => (req === 'optional' ? <span className="reqtag">Optional</span> : req === 'conditional' ? <span className="reqtag cond">Conditional</span> : null);
 export const Days = ({ n }) => (n == null ? null : <span className={`var ${n > 5 ? 'bad' : n > 0 ? 'warn' : 'ok'}`} title={`${n > 0 ? '+' : ''}${n} working days`}>{n > 0 ? `+${n}d` : n < 0 ? `${n}d` : 'on plan'}</span>);
